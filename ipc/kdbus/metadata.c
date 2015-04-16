@@ -29,7 +29,6 @@
 #include <linux/uidgid.h>
 #include <linux/uio.h>
 #include <linux/user_namespace.h>
-#include <linux/version.h>
 
 #include "bus.h"
 #include "connection.h"
