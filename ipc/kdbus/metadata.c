@@ -282,19 +282,21 @@ static void kdbus_meta_proc_collect_pid_comm(struct kdbus_meta_proc *mp)
 static void kdbus_meta_proc_collect_exe(struct kdbus_meta_proc *mp)
 {
 	struct mm_struct *mm;
+	struct file *exe_file;
 
 	mm = get_task_mm(current);
 	if (!mm)
 		return;
 
-	down_read(&mm->mmap_sem);
-	if (mm->exe_file) {
-		mp->exe_path = mm->exe_file->f_path;
+	rcu_read_lock();
+	exe_file = rcu_dereference(mm->exe_file);
+	if (exe_file) {
+		mp->exe_path = exe_file->f_path;
 		path_get(&mp->exe_path);
 		get_fs_root(current->fs, &mp->root_path);
 		mp->valid |= KDBUS_ATTACH_EXE;
 	}
-	up_read(&mm->mmap_sem);
+	rcu_read_unlock();
 
 	mmput(mm);
 }
