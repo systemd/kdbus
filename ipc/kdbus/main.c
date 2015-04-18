@@ -116,6 +116,7 @@ static void __exit kdbus_exit(void)
 {
 	kdbus_fs_exit();
 	kobject_put(kdbus_dir);
+	ida_destroy(&kdbus_node_ida);
 }
 
 module_init(kdbus_init);

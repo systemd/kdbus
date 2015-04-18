@@ -58,6 +58,8 @@ struct kdbus_node {
 
 #define kdbus_node_from_rb(_node) rb_entry((_node), struct kdbus_node, rb)
 
+extern struct ida kdbus_node_ida;
+
 void kdbus_node_init(struct kdbus_node *node, unsigned int type);
 
 int kdbus_node_link(struct kdbus_node *node, struct kdbus_node *parent,
