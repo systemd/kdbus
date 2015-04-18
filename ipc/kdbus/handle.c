@@ -610,7 +610,6 @@ static unsigned int kdbus_handle_poll(struct file *file,
 	struct kdbus_handle *handle = file->private_data;
 	enum kdbus_handle_type type;
 	unsigned int mask = POLLOUT | POLLWRNORM;
-	int ret;
 
 	/*
 	 * This pairs with smp_wmb() during handle setup. It guarantees that
@@ -626,17 +625,20 @@ static unsigned int kdbus_handle_poll(struct file *file,
 	if (type != KDBUS_HANDLE_CONNECTED)
 		return POLLERR | POLLHUP;
 
-	ret = kdbus_conn_acquire(handle->conn);
-	if (ret < 0)
-		return POLLERR | POLLHUP;
-
 	poll_wait(file, &handle->conn->wait, wait);
+
+	/*
+	 * Verify the connection hasn't been deactivated _after_ adding the
+	 * wait-queue. This guarantees, that if the connection is deactivated
+	 * after we checked it, the waitqueue is signaled and we're called
+	 * again.
+	 */
+	if (!kdbus_conn_active(handle->conn))
+		return POLLERR | POLLHUP;
 
 	if (!list_empty(&handle->conn->queue.msg_list) ||
 	    atomic_read(&handle->conn->lost_count) > 0)
 		mask |= POLLIN | POLLRDNORM;
-
-	kdbus_conn_release(handle->conn);
 
 	return mask;
 }
