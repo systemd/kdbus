@@ -18,6 +18,7 @@
 #include <linux/init.h>
 #include <linux/kdev_t.h>
 #include <linux/module.h>
+#include <linux/mutex.h>
 #include <linux/poll.h>
 #include <linux/rwsem.h>
 #include <linux/sched.h>
@@ -229,7 +230,7 @@ enum kdbus_handle_type {
 
 /**
  * struct kdbus_handle - handle to the kdbus system
- * @rwlock:		handle lock
+ * @lock:		handle lock
  * @type:		type of this handle (KDBUS_HANDLE_*)
  * @bus_owner:		bus this handle owns
  * @ep_owner:		endpoint this handle owns
@@ -237,7 +238,7 @@ enum kdbus_handle_type {
  * @privileged:		Flag to mark a handle as privileged
  */
 struct kdbus_handle {
-	struct rw_semaphore rwlock;
+	struct mutex lock;
 
 	enum kdbus_handle_type type;
 	union {
@@ -265,7 +266,7 @@ static int kdbus_handle_open(struct inode *inode, struct file *file)
 		goto exit;
 	}
 
-	init_rwsem(&handle->rwlock);
+	mutex_init(&handle->lock);
 	handle->type = KDBUS_HANDLE_NONE;
 
 	if (node->type == KDBUS_NODE_ENDPOINT) {
@@ -355,8 +356,8 @@ static long kdbus_handle_ioctl_control(struct file *file, unsigned int cmd,
 			break;
 		}
 
-		handle->type = KDBUS_HANDLE_BUS_OWNER;
 		handle->bus_owner = bus;
+		ret = KDBUS_HANDLE_BUS_OWNER;
 		break;
 	}
 
@@ -396,8 +397,8 @@ static long kdbus_handle_ioctl_ep(struct file *file, unsigned int cmd,
 			break;
 		}
 
-		handle->type = KDBUS_HANDLE_EP_OWNER;
 		handle->ep_owner = ep;
+		ret = KDBUS_HANDLE_EP_OWNER;
 		break;
 
 	case KDBUS_CMD_HELLO:
@@ -407,8 +408,8 @@ static long kdbus_handle_ioctl_ep(struct file *file, unsigned int cmd,
 			break;
 		}
 
-		handle->type = KDBUS_HANDLE_CONNECTED;
 		handle->conn = conn;
+		ret = KDBUS_HANDLE_CONNECTED;
 		break;
 
 	default:
@@ -522,19 +523,41 @@ static long kdbus_handle_ioctl(struct file *file, unsigned int cmd,
 	case KDBUS_CMD_BUS_MAKE:
 	case KDBUS_CMD_ENDPOINT_MAKE:
 	case KDBUS_CMD_HELLO:
-		/* bail out early if already typed */
-		if (handle->type != KDBUS_HANDLE_NONE)
-			break;
-
-		down_write(&handle->rwlock);
+		mutex_lock(&handle->lock);
 		if (handle->type == KDBUS_HANDLE_NONE) {
 			if (node->type == KDBUS_NODE_CONTROL)
 				ret = kdbus_handle_ioctl_control(file, cmd,
 								 argp);
 			else if (node->type == KDBUS_NODE_ENDPOINT)
 				ret = kdbus_handle_ioctl_ep(file, cmd, argp);
+
+			if (ret > 0) {
+				/*
+				 * The data given via open() is not sufficient
+				 * to setup a kdbus handle. Hence, we require
+				 * the user to perform a setup ioctl. This setup
+				 * can only be performed once and defines the
+				 * type of the handle. The different setup
+				 * ioctls are locked against each other so they
+				 * cannot race. Once the handle type is set,
+				 * the type-dependent ioctls are enabled. To
+				 * improve performance, we don't lock those via
+				 * handle->lock. Instead, we issue a
+				 * write-barrier before performing the
+				 * type-change, which pairs with smp_rmb() in
+				 * all handlers that access the type field. This
+				 * guarantees the handle is fully setup, if
+				 * handle->type is set. If handle->type is
+				 * unset, you must not make any assumptions
+				 * without taking handle->lock.
+				 * Note that handle->type is only set once. It
+				 * will never change afterwards.
+				 */
+				smp_wmb();
+				handle->type = ret;
+			}
 		}
-		up_write(&handle->rwlock);
+		mutex_unlock(&handle->lock);
 		break;
 
 	case KDBUS_CMD_ENDPOINT_UPDATE:
@@ -549,14 +572,30 @@ static long kdbus_handle_ioctl(struct file *file, unsigned int cmd,
 	case KDBUS_CMD_MATCH_REMOVE:
 	case KDBUS_CMD_SEND:
 	case KDBUS_CMD_RECV:
-	case KDBUS_CMD_FREE:
-		down_read(&handle->rwlock);
-		if (handle->type == KDBUS_HANDLE_EP_OWNER)
+	case KDBUS_CMD_FREE: {
+		enum kdbus_handle_type type;
+
+		/*
+		 * This read-barrier pairs with smp_wmb() of the handle setup.
+		 * it guarantees the handle is fully written, in case the
+		 * type has been set. It allows us to access the handle without
+		 * taking handle->lock, given the guarantee that the type is
+		 * only ever set once, and stays constant afterwards.
+		 * Furthermore, the handle object itself is not modified in any
+		 * way after the type is set. That is, the type-field is the
+		 * last field that is written on any handle. If it has not been
+		 * set, we must not access the handle here.
+		 */
+		type = handle->type;
+		smp_rmb();
+
+		if (type == KDBUS_HANDLE_EP_OWNER)
 			ret = kdbus_handle_ioctl_ep_owner(file, cmd, argp);
-		else if (handle->type == KDBUS_HANDLE_CONNECTED)
+		else if (type == KDBUS_HANDLE_CONNECTED)
 			ret = kdbus_handle_ioctl_connected(file, cmd, argp);
-		up_read(&handle->rwlock);
+
 		break;
+	}
 	default:
 		ret = -ENOTTY;
 		break;
@@ -569,16 +608,23 @@ static unsigned int kdbus_handle_poll(struct file *file,
 				      struct poll_table_struct *wait)
 {
 	struct kdbus_handle *handle = file->private_data;
+	enum kdbus_handle_type type;
 	unsigned int mask = POLLOUT | POLLWRNORM;
 	int ret;
 
+	/*
+	 * This pairs with smp_wmb() during handle setup. It guarantees that
+	 * _iff_ the handle type is set, handle->conn is valid. Furthermore,
+	 * _iff_ the type is set, the handle object is constant and never
+	 * changed again. If it's not set, we must not access the handle but
+	 * bail out. We also must assume no setup has taken place, yet.
+	 */
+	type = handle->type;
+	smp_rmb();
+
 	/* Only a connected endpoint can read/write data */
-	down_read(&handle->rwlock);
-	if (handle->type != KDBUS_HANDLE_CONNECTED) {
-		up_read(&handle->rwlock);
+	if (type != KDBUS_HANDLE_CONNECTED)
 		return POLLERR | POLLHUP;
-	}
-	up_read(&handle->rwlock);
 
 	ret = kdbus_conn_acquire(handle->conn);
 	if (ret < 0)
@@ -598,13 +644,23 @@ static unsigned int kdbus_handle_poll(struct file *file,
 static int kdbus_handle_mmap(struct file *file, struct vm_area_struct *vma)
 {
 	struct kdbus_handle *handle = file->private_data;
+	enum kdbus_handle_type type;
 	int ret = -EBADFD;
 
-	if (down_read_trylock(&handle->rwlock)) {
-		if (handle->type == KDBUS_HANDLE_CONNECTED)
-			ret = kdbus_pool_mmap(handle->conn->pool, vma);
-		up_read(&handle->rwlock);
-	}
+	/*
+	 * This pairs with smp_wmb() during handle setup. It guarantees that
+	 * _iff_ the handle type is set, handle->conn is valid. Furthermore,
+	 * _iff_ the type is set, the handle object is constant and never
+	 * changed again. If it's not set, we must not access the handle but
+	 * bail out. We also must assume no setup has taken place, yet.
+	 */
+	type = handle->type;
+	smp_rmb();
+
+	/* Only connected handles have a pool we can map */
+	if (type == KDBUS_HANDLE_CONNECTED)
+		ret = kdbus_pool_mmap(handle->conn->pool, vma);
+
 	return ret;
 }
 
