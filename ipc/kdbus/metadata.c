@@ -245,25 +245,23 @@ static void kdbus_meta_proc_collect_pids(struct kdbus_meta_proc *mp)
 
 static int kdbus_meta_proc_collect_auxgroups(struct kdbus_meta_proc *mp)
 {
-	struct group_info *info;
+	const struct group_info *info;
 	size_t i;
 
-	info = get_current_groups();
+	/* no need to lock/ref, current creds cannot change */
+	info = current_cred()->group_info;
 
 	if (info->ngroups > 0) {
 		mp->auxgrps = kmalloc_array(info->ngroups, sizeof(kgid_t),
 					    GFP_KERNEL);
-		if (!mp->auxgrps) {
-			put_group_info(info);
+		if (!mp->auxgrps)
 			return -ENOMEM;
-		}
 
 		for (i = 0; i < info->ngroups; i++)
 			mp->auxgrps[i] = GROUP_AT(info, i);
 	}
 
 	mp->n_auxgrps = info->ngroups;
-	put_group_info(info);
 	mp->valid |= KDBUS_ATTACH_AUXGROUPS;
 
 	return 0;
