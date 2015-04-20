@@ -146,11 +146,32 @@ static int kdbus_args_negotiate(struct kdbus_args *args)
 int __kdbus_args_parse(struct kdbus_args *args, void __user *argp,
 		       size_t type_size, size_t items_offset, void **out)
 {
+	u64 user_size;
 	int ret, i;
 
-	args->cmd = kdbus_memdup_user(argp, type_size, KDBUS_CMD_MAX_SIZE);
-	if (IS_ERR(args->cmd))
-		return PTR_ERR(args->cmd);
+	ret = kdbus_copy_from_user(&user_size, argp, sizeof(user_size));
+	if (ret < 0)
+		return ret;
+
+	if (user_size < type_size)
+		return -EINVAL;
+	if (user_size > KDBUS_CMD_MAX_SIZE)
+		return -EMSGSIZE;
+
+	if (user_size <= sizeof(args->cmd_buf)) {
+		if (copy_from_user(args->cmd_buf, argp, user_size))
+			return -EFAULT;
+		args->cmd = (void*)args->cmd_buf;
+	} else {
+		args->cmd = memdup_user(argp, user_size);
+		if (IS_ERR(args->cmd))
+			return PTR_ERR(args->cmd);
+	}
+
+	if (args->cmd->size != user_size) {
+		ret = -EINVAL;
+		goto error;
+	}
 
 	args->cmd->return_flags = 0;
 	args->user = argp;
@@ -207,7 +228,8 @@ int kdbus_args_clear(struct kdbus_args *args, int ret)
 		if (put_user(args->cmd->return_flags,
 			     &args->user->return_flags))
 			ret = -EFAULT;
-		kfree(args->cmd);
+		if (args->cmd != (void*)args->cmd_buf)
+			kfree(args->cmd);
 		args->cmd = NULL;
 	}
 

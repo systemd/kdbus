@@ -50,51 +50,6 @@ int kdbus_copy_from_user(void *dest, void __user *user_ptr, size_t size)
 }
 
 /**
- * kdbus_memdup_user() - copy dynamically sized object from user-space
- * @user_ptr:	user-provided source buffer
- * @sz_min:	minimum object size
- * @sz_max:	maximum object size
- *
- * This copies a dynamically sized object from user-space into kernel-space. We
- * require the object to have a 64bit size field at offset 0. We read it out
- * first, allocate a suitably sized buffer and then copy all data.
- *
- * The @sz_min and @sz_max parameters define possible min and max object sizes
- * so user-space cannot trigger un-bound kernel-space allocations.
- *
- * The same alignment-restrictions as described in kdbus_copy_from_user() apply.
- *
- * Return: pointer to dynamically allocated copy, or ERR_PTR() on failure.
- */
-void *kdbus_memdup_user(void __user *user_ptr, size_t sz_min, size_t sz_max)
-{
-	void *ptr;
-	u64 size;
-	int ret;
-
-	ret = kdbus_copy_from_user(&size, user_ptr, sizeof(size));
-	if (ret < 0)
-		return ERR_PTR(ret);
-
-	if (size < sz_min)
-		return ERR_PTR(-EINVAL);
-
-	if (size > sz_max)
-		return ERR_PTR(-EMSGSIZE);
-
-	ptr = memdup_user(user_ptr, size);
-	if (IS_ERR(ptr))
-		return ptr;
-
-	if (*(u64 *)ptr != size) {
-		kfree(ptr);
-		return ERR_PTR(-EINVAL);
-	}
-
-	return ptr;
-}
-
-/**
  * kdbus_verify_uid_prefix() - verify UID prefix of a user-supplied name
  * @name:	user-supplied name to verify
  * @user_ns:	user-namespace to act in
