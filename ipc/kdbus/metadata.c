@@ -281,15 +281,10 @@ static void kdbus_meta_proc_collect_pid_comm(struct kdbus_meta_proc *mp)
 
 static void kdbus_meta_proc_collect_exe(struct kdbus_meta_proc *mp)
 {
-	struct mm_struct *mm;
 	struct file *exe_file;
 
-	mm = get_task_mm(current);
-	if (!mm)
-		return;
-
 	rcu_read_lock();
-	exe_file = rcu_dereference(mm->exe_file);
+	exe_file = rcu_dereference(current->mm->exe_file);
 	if (exe_file) {
 		mp->exe_path = exe_file->f_path;
 		path_get(&mp->exe_path);
@@ -297,28 +292,18 @@ static void kdbus_meta_proc_collect_exe(struct kdbus_meta_proc *mp)
 		mp->valid |= KDBUS_ATTACH_EXE;
 	}
 	rcu_read_unlock();
-
-	mmput(mm);
 }
 
 static int kdbus_meta_proc_collect_cmdline(struct kdbus_meta_proc *mp)
 {
-	struct mm_struct *mm;
+	struct mm_struct *mm = current->mm;
 	char *cmdline;
 
-	mm = get_task_mm(current);
-	if (!mm)
+	if (!mm->arg_end)
 		return 0;
-
-	if (!mm->arg_end) {
-		mmput(mm);
-		return 0;
-	}
 
 	cmdline = strndup_user((const char __user *)mm->arg_start,
 			       mm->arg_end - mm->arg_start);
-	mmput(mm);
-
 	if (IS_ERR(cmdline))
 		return PTR_ERR(cmdline);
 
