@@ -71,10 +71,6 @@ static int kdbus_args_verify(struct kdbus_args *args)
 	if (!KDBUS_ITEMS_END(item, args->items, args->items_size))
 		return -EINVAL;
 
-	for (i = 0; i < args->argc; ++i)
-		if (args->argv[i].mandatory && !args->argv[i].item)
-			return -EINVAL;
-
 	return 0;
 }
 
@@ -149,7 +145,7 @@ static int kdbus_args_negotiate(struct kdbus_args *args)
 int __kdbus_args_parse(struct kdbus_args *args, void __user *argp,
 		       size_t type_size, size_t items_offset, void **out)
 {
-	int ret;
+	int ret, i;
 
 	args->cmd = kdbus_memdup_user(argp, type_size, KDBUS_CMD_MAX_SIZE);
 	if (IS_ERR(args->cmd))
@@ -172,6 +168,15 @@ int __kdbus_args_parse(struct kdbus_args *args, void __user *argp,
 	ret = kdbus_args_negotiate(args);
 	if (ret < 0)
 		goto error;
+
+	/* mandatory items must be given (but not on negotiation) */
+	if (!(args->cmd->flags & KDBUS_FLAG_NEGOTIATE)) {
+		for (i = 0; i < args->argc; ++i)
+			if (args->argv[i].mandatory && !args->argv[i].item) {
+				ret = -EINVAL;
+				goto error;
+			}
+	}
 
 	*out = args->cmd;
 	return !!(args->cmd->flags & KDBUS_FLAG_NEGOTIATE);
