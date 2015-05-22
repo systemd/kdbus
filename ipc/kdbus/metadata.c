@@ -835,7 +835,6 @@ int kdbus_meta_export_prepare(struct kdbus_meta_proc *mp,
 	}
 
 	*mask &= valid;
-	*mask &= kdbus_meta_attach_mask;
 
 	if (!*mask)
 		goto exit;

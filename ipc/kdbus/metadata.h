@@ -24,8 +24,6 @@ struct kdbus_pool_slice;
 struct kdbus_meta_proc;
 struct kdbus_meta_conn;
 
-extern unsigned long long kdbus_meta_attach_mask;
-
 struct kdbus_meta_proc *kdbus_meta_proc_new(void);
 struct kdbus_meta_proc *kdbus_meta_proc_ref(struct kdbus_meta_proc *mp);
 struct kdbus_meta_proc *kdbus_meta_proc_unref(struct kdbus_meta_proc *mp);
