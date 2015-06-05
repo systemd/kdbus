@@ -514,8 +514,6 @@ int kdbus_cmd_name_acquire(struct kdbus_conn *conn, void __user *argp)
 
 	ret = kdbus_name_acquire(conn->ep->bus->name_registry, conn, item_name,
 				 cmd->flags, &cmd->return_flags);
-	if (ret < 0)
-		goto exit_dec;
 
 exit_dec:
 	atomic_dec(&conn->name_count);
