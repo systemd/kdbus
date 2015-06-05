@@ -355,13 +355,7 @@ struct kdbus_cmd_hello {
           Set the bits for metadata this connection permits to be sent to the
           receiving peer. Only metadata items that are both allowed to be sent
           by the sender and that are requested by the receiver will be attached
-          to the message. Note, however, that the bus may optionally require
-          some of those bits to be set. If the match fails, the ioctl will fail
-          with <varname>errno</varname> set to
-          <constant>ECONNREFUSED</constant>. In either case, when returning the
-          field will be set to the mask of metadata items that are enforced by
-          the bus with the <constant>KDBUS_FLAGS_KERNEL</constant> bit set as
-          well.
+          to the message.
         </para></listitem>
       </varlistentry>
 

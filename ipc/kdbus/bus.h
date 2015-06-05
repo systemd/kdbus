@@ -37,7 +37,6 @@ struct kdbus_user;
  * @node:		kdbus_node
  * @id:			ID of this bus in the domain
  * @bus_flags:		Simple pass-through flags from userspace to userspace
- * @attach_flags_req:	KDBUS_ATTACH_* flags required by connecting peers
  * @attach_flags_owner:	KDBUS_ATTACH_* flags of bus creator that other
  *			connections can see or query
  * @id128:		Unique random 128 bit ID of this bus
@@ -60,7 +59,6 @@ struct kdbus_bus {
 	/* static */
 	u64 id;
 	u64 bus_flags;
-	u64 attach_flags_req;
 	u64 attach_flags_owner;
 	u8 id128[16];
 	struct kdbus_bloom_parameter bloom;

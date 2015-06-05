@@ -66,22 +66,15 @@ static struct kdbus_bus *kdbus_bus_new(struct kdbus_domain *domain,
 				       const char *name,
 				       struct kdbus_bloom_parameter *bloom,
 				       const u64 *pattach_owner,
-				       const u64 *pattach_recv,
 				       u64 flags, kuid_t uid, kgid_t gid)
 {
 	struct kdbus_bus *b;
 	u64 attach_owner;
-	u64 attach_recv;
 	int ret;
 
 	if (bloom->size < 8 || bloom->size > KDBUS_BUS_BLOOM_MAX_SIZE ||
 	    !KDBUS_IS_ALIGNED8(bloom->size) || bloom->n_hash < 1)
 		return ERR_PTR(-EINVAL);
-
-	ret = kdbus_sanitize_attach_flags(pattach_recv ? *pattach_recv : 0,
-					  &attach_recv);
-	if (ret < 0)
-		return ERR_PTR(ret);
 
 	ret = kdbus_sanitize_attach_flags(pattach_owner ? *pattach_owner : 0,
 					  &attach_owner);
@@ -111,7 +104,6 @@ static struct kdbus_bus *kdbus_bus_new(struct kdbus_domain *domain,
 
 	b->id = atomic64_inc_return(&domain->last_id);
 	b->bus_flags = flags;
-	b->attach_flags_req = attach_recv;
 	b->attach_flags_owner = attach_owner;
 	generate_random_uuid(b->id128);
 	b->bloom = *bloom;
@@ -380,7 +372,6 @@ struct kdbus_bus *kdbus_cmd_bus_make(struct kdbus_domain *domain,
 		{ .type = KDBUS_ITEM_MAKE_NAME, .mandatory = true },
 		{ .type = KDBUS_ITEM_BLOOM_PARAMETER, .mandatory = true },
 		{ .type = KDBUS_ITEM_ATTACH_FLAGS_SEND },
-		{ .type = KDBUS_ITEM_ATTACH_FLAGS_RECV },
 	};
 	struct kdbus_args args = {
 		.allowed_flags = KDBUS_FLAG_NEGOTIATE |
@@ -399,7 +390,6 @@ struct kdbus_bus *kdbus_cmd_bus_make(struct kdbus_domain *domain,
 	bus = kdbus_bus_new(domain,
 			    argv[1].item->str, &argv[2].item->bloom_parameter,
 			    argv[3].item ? argv[3].item->data64 : NULL,
-			    argv[4].item ? argv[4].item->data64 : NULL,
 			    cmd->flags, current_euid(), current_egid());
 	if (IS_ERR(bus)) {
 		ret = PTR_ERR(bus);

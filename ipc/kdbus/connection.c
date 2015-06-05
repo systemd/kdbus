@@ -112,10 +112,6 @@ static struct kdbus_conn *kdbus_conn_new(struct kdbus_ep *ep, bool privileged,
 	if (ret < 0)
 		return ERR_PTR(ret);
 
-	/* The attach flags must always satisfy the bus requirements. */
-	if (bus->attach_flags_req & ~attach_flags_send)
-		return ERR_PTR(-ECONNREFUSED);
-
 	conn = kzalloc(sizeof(*conn), GFP_KERNEL);
 	if (!conn)
 		return ERR_PTR(-ENOMEM);
@@ -1835,7 +1831,6 @@ exit:
  */
 int kdbus_cmd_update(struct kdbus_conn *conn, void __user *argp)
 {
-	struct kdbus_bus *bus = conn->ep->bus;
 	struct kdbus_item *item_policy;
 	u64 *item_attach_send = NULL;
 	u64 *item_attach_recv = NULL;
@@ -1876,11 +1871,6 @@ int kdbus_cmd_update(struct kdbus_conn *conn, void __user *argp)
 						  &attach_send);
 		if (ret < 0)
 			goto exit;
-
-		if (bus->attach_flags_req & ~attach_send) {
-			ret = -EINVAL;
-			goto exit;
-		}
 	}
 
 	if (item_attach_recv) {

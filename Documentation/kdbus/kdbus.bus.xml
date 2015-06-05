@@ -198,21 +198,6 @@ struct kdbus_cmd {
             </varlistentry>
 
             <varlistentry>
-              <term><constant>KDBUS_ITEM_ATTACH_FLAGS_RECV</constant></term>
-              <listitem>
-                <para>
-                  An optional item that contains a set of required attach flags
-                  that connections must allow. This item is used as a
-                  negotiation measure during connection creation. If connections
-                  do not satisfy the bus requirements, they are not allowed on
-                  the bus. If not set, the bus does not require any metadata to
-                  be attached; in this case connections are free to set their
-                  own attach flags.
-                </para>
-              </listitem>
-            </varlistentry>
-
-            <varlistentry>
               <term><constant>KDBUS_ITEM_ATTACH_FLAGS_SEND</constant></term>
               <listitem>
                 <para>

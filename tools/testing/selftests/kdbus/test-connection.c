@@ -70,15 +70,6 @@ int kdbus_test_hello(struct kdbus_test_env *env)
 
 	hello.pool_size = POOL_SIZE;
 
-	/*
-	 * The connection created by the core requires ALL meta flags
-	 * to be sent. An attempt to send less than that should result in
-	 * -ECONNREFUSED.
-	 */
-	hello.attach_flags_send = _KDBUS_ATTACH_ALL & ~KDBUS_ATTACH_TIMESTAMP;
-	ret = kdbus_cmd_hello(fd, &hello);
-	ASSERT_RETURN(ret == -ECONNREFUSED);
-
 	hello.attach_flags_send = _KDBUS_ATTACH_ALL;
 	hello.offset = (__u64)-1;
 
