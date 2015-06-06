@@ -1,25 +1,14 @@
-ifeq ($(strip $(V)), 1)
-  Q =
-else
-  Q = @
-endif
-
-CFLAGS		+= -std=gnu99 -Wall -Wextra -g \
-		   -include $(KERNELDIR)/include/uapi/linux/memfd.h \
-		   -I../samples/ \
-		   -D_GNU_SOURCE \
-		   -Wno-unused-parameter \
-		   -Wmaybe-uninitialized \
-		   -Wredundant-decls \
-		   -Wcast-align \
-		   -Wsign-compare \
-		   -Wno-missing-field-initializers
-LDFLAGS		:= -pthread -lcap -lm
-CC		:= $(CROSS_COMPILE)gcc
+CFLAGS += -I../../../../usr/include/
+CFLAGS += -I../../../../samples/kdbus/
+CFLAGS += -I../../../../include/uapi/
+CFLAGS += -std=gnu99
+CFLAGS += -DKBUILD_MODNAME=\"kdbus\" -D_GNU_SOURCE
+LDLIBS = -pthread -lcap -lm
 
 OBJS= \
 	kdbus-enum.o		\
 	kdbus-util.o		\
+	kdbus-test.o		\
 	kdbus-test.o		\
 	test-activator.o	\
 	test-attach-flags.o	\
@@ -44,13 +33,16 @@ OBJS= \
 
 all: kdbus-test
 
-%.o: %.c ../kdbus.h
-	@echo '  TARGET_CC $@'
-	$(Q)$(CC) $(CFLAGS) -DKBUILD_MODNAME=\"$(KBUILD_MODNAME)\" -c $< -o $@
+include ../lib.mk
+
+%.o: %.c
+	$(CC) $(CFLAGS) -c $< -o $@
 
 kdbus-test: $(OBJS)
-	@echo '  TARGET_LD $@'
-	$(Q)$(CC) $(CFLAGS) $(LDFLAGS) $^ -o $@
+	$(CC) $(CFLAGS) $^ $(LDLIBS) -o $@
 
-clean::
-	rm -f *.o $(TESTS)
+run_tests:
+	./kdbus-test --tap
+
+clean:
+	rm -f *.o kdbus-test

@@ -17,7 +17,7 @@
 
 #include <linux/kernel.h>
 
-#include "kdbus.h"
+#include <uapi/linux/kdbus.h>
 #include "util.h"
 
 /* generic access and iterators over a stream of items */

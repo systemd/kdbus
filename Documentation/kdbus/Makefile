@@ -1,4 +1,4 @@
-docs=	\
+DOCS :=	\
 	kdbus.xml		\
 	kdbus.bus.xml		\
 	kdbus.connection.xml	\
@@ -11,18 +11,30 @@ docs=	\
 	kdbus.policy.xml	\
 	kdbus.pool.xml
 
-manpages=$(docs:.xml=.7)
-htmlfiles=$(docs:.xml=.html)
+XMLFILES := $(addprefix $(obj)/,$(DOCS))
+MANFILES := $(patsubst %.xml, %.7, $(XMLFILES))
+HTMLFILES := $(patsubst %.xml, %.html, $(XMLFILES))
 
+XMLTO_ARGS := -m $(srctree)/$(src)/stylesheet.xsl --skip-validation
+
+quiet_cmd_db2man = MAN     $@
+      cmd_db2man = xmlto man $(XMLTO_ARGS) -o $(obj) $<
 %.7: %.xml
-	xmlto man -m stylesheet.xsl -o . $<
+	@(which xmlto > /dev/null 2>&1) || \
+	 (echo "*** You need to install xmlto ***"; \
+	  exit 1)
+	$(call cmd,db2man)
 
+quiet_cmd_db2html = HTML    $@
+      cmd_db2html = xmlto html-nochunks $(XMLTO_ARGS) -o $(obj) $<
 %.html: %.xml
-	xmlto html-nochunks -m stylesheet.xsl -o . $<
+	@(which xmlto > /dev/null 2>&1) || \
+	 (echo "*** You need to install xmlto ***"; \
+	  exit 1)
+	$(call cmd,db2html)
 
-mandocs: $(manpages)
+mandocs: $(MANFILES)
 
-htmldocs: $(htmlfiles)
+htmldocs: $(HTMLFILES)
 
-clean::
-	rm -rf *.7 *.html *.proc manpages.*
+clean-files := $(MANFILES) $(HTMLFILES)

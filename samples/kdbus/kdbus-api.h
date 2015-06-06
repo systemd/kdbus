@@ -2,7 +2,7 @@
 #define KDBUS_API_H
 
 #include <sys/ioctl.h>
-#include "../kdbus.h"
+#include <linux/kdbus.h>
 
 #define KDBUS_ALIGN8(l) (((l) + 7) & ~7)
 #define KDBUS_ITEM_HEADER_SIZE offsetof(struct kdbus_item, data)

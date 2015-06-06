@@ -21,7 +21,7 @@
 #include <linux/rwsem.h>
 #include <linux/spinlock.h>
 
-#include "kdbus.h"
+#include <uapi/linux/kdbus.h>
 #include "metadata.h"
 #include "names.h"
 #include "node.h"

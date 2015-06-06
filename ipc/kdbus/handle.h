@@ -15,7 +15,7 @@
 #define __KDBUS_HANDLE_H
 
 #include <linux/fs.h>
-#include "kdbus.h"
+#include <uapi/linux/kdbus.h>
 
 extern const struct file_operations kdbus_handle_ops;
 

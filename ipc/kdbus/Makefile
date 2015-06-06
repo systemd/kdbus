@@ -1,4 +1,4 @@
-kdbus$(EXT)-y := \
+kdbus-y := \
 	bus.o \
 	connection.o \
 	endpoint.o \
@@ -15,73 +15,8 @@ kdbus$(EXT)-y := \
 	domain.o \
 	policy.o \
 	pool.o \
-	queue.o \
 	reply.o \
+	queue.o \
 	util.o
 
-obj-m += kdbus$(EXT).o
-
-KERNELVER		?= $(shell uname -r)
-KERNELDIR 		?= /lib/modules/$(KERNELVER)/build
-PWD			:= $(shell pwd)
-
-all: module tools test samples docs
-
-tools::
-	$(MAKE) -C tools KERNELDIR=$(realpath $(KERNELDIR)) KBUILD_MODNAME=kdbus$(EXT)
-
-test::
-	$(MAKE) -C test KERNELDIR=$(realpath $(KERNELDIR)) KBUILD_MODNAME=kdbus$(EXT)
-
-samples::
-	$(MAKE) -C samples KERNELDIR=$(realpath $(KERNELDIR)) KBUILD_MODNAME=kdbus$(EXT)
-
-module:
-	$(MAKE) -C $(KERNELDIR) M=$(PWD)
-
-clean:
-	rm -f *.o *~ core .depend .*.cmd *.ko *.mod.c
-	rm -f Module.markers Module.symvers modules.order
-	rm -rf .tmp_versions Modules.symvers $(hostprogs-y)
-	$(MAKE) -C doc clean
-	$(MAKE) -C test clean
-
-check:
-	test/kdbus-test
-
-mandocs:
-	$(MAKE) -C doc mandocs
-
-htmldocs:
-	$(MAKE) -C doc htmldocs
-
-docs:	mandocs htmldocs
-
-kerneldoc_check:
-	$(KERNELDIR)/scripts/kernel-doc *.c kdbus.h >/dev/null | grep "^Warning"
-
-install: module
-	mkdir -p /lib/modules/$(KERNELVER)/kernel/ipc/kdbus$(EXT)/
-	cp -f kdbus$(EXT).ko /lib/modules/$(KERNELVER)/kernel/ipc/kdbus$(EXT)/
-	depmod $(KERNELVER)
-
-uninstall:
-	rm -f /lib/modules/$(KERNELVER)/kernel/ipc/kdbus/kdbus$(EXT).ko
-	rm -f /lib/modules/$(KERNELVER)/kernel/drivers/kdbus/kdbus$(EXT).ko
-	rm -f /lib/modules/$(KERNELVER)/kernel/drivers/misc/kdbus/kdbus$(EXT).ko
-
-coccicheck:
-	$(MAKE) -C $(KERNELDIR) M=$(PWD) coccicheck
-
-tt-prepare: module test
-	-sudo sh -c 'dmesg -c > /dev/null'
-	-sudo umount /sys/fs/kdbus$(EXT)
-	-sudo sh -c 'rmmod kdbus$(EXT)'
-	sudo sh -c 'insmod kdbus$(EXT).ko attach_flags_mask=0xffffffffffffffff'
-	sudo mount -t kdbus$(EXT)fs kdbus$(EXT)fs /sys/fs/kdbus$(EXT)
-
-tt: tt-prepare
-	test/kdbus-test -m kdbus$(EXT) ; (R=$$? ; dmesg ; exit $$R)
-
-stt: tt-prepare
-	sudo test/kdbus-test -m kdbus$(EXT) ; (R=$$? ; dmesg ; exit $$R)
+obj-$(CONFIG_KDBUS) += kdbus.o

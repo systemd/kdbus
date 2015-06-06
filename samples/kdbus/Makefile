@@ -1,30 +1,9 @@
-ifeq ($(strip $(V)), 1)
-  Q =
-else
-  Q = @
-endif
+# kbuild trick to avoid linker error. Can be omitted if a module is built.
+obj- := dummy.o
 
-CFLAGS		+= -std=gnu99 -Wall -Wextra -g \
-		   -D_GNU_SOURCE \
-		   -Wno-unused-parameter \
-		   -Wmaybe-uninitialized \
-		   -Wredundant-decls \
-		   -Wcast-align \
-		   -Wsign-compare \
-		   -Wno-missing-field-initializers
-CC		:= $(CROSS_COMPILE)gcc
+hostprogs-$(CONFIG_SAMPLE_KDBUS) += kdbus-workers
 
-SAMPLES = kdbus-workers
+always := $(hostprogs-y)
 
-all: $(SAMPLES)
-
-%.o: %.c ../kdbus.h
-	@echo '  TARGET_CC $@'
-	$(Q)$(CC) $(CFLAGS) -DKBUILD_MODNAME=\"$(KBUILD_MODNAME)\" -c $< -o $@
-
-kdbus-%: kdbus-%.o
-	@echo '  TARGET_LD $@'
-	$(Q)$(CC) $(CFLAGS) $(LDFLAGS) $^ -o $@
-
-clean::
-	rm -f *.o $(TESTS)
+HOSTCFLAGS_kdbus-workers.o += -I$(objtree)/usr/include
+HOSTLOADLIBES_kdbus-workers := -lrt

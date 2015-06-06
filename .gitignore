@@ -6,9 +6,4 @@ Module.symvers
 *.o
 *.swp
 .tmp_versions
-samples/kdbus-workers
 tags
-tools/kdbus-monitor
-test/kdbus-test
-doc/*.html
-doc/*.7
