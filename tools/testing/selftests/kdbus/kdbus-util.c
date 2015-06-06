@@ -29,9 +29,7 @@
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <linux/unistd.h>
-#ifndef MFD_CLOEXEC
 #include <linux/memfd.h>
-#endif
 
 #ifndef __NR_memfd_create
   #ifdef __x86_64__
@@ -48,9 +46,10 @@
 #include "kdbus-enum.h"
 
 #ifndef F_ADD_SEALS
-#define F_LINUX_SPECIFIC_BASE  1024
+#define F_LINUX_SPECIFIC_BASE	1024
 #define F_ADD_SEALS     (F_LINUX_SPECIFIC_BASE + 9)
 #define F_GET_SEALS     (F_LINUX_SPECIFIC_BASE + 10)
+
 #define F_SEAL_SEAL     0x0001  /* prevent further seals from being set */
 #define F_SEAL_SHRINK   0x0002  /* prevent file from shrinking */
 #define F_SEAL_GROW     0x0004  /* prevent file from growing */

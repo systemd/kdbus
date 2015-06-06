@@ -285,8 +285,6 @@ void kdbus_bus_broadcast(struct kdbus_bus *bus,
 			continue;
 
 		if (conn_src) {
-			u64 attach_flags;
-
 			/*
 			 * Anyone can send broadcasts, as they have no
 			 * destination. But a receiver needs TALK access to
@@ -295,19 +293,12 @@ void kdbus_bus_broadcast(struct kdbus_bus *bus,
 			if (!kdbus_conn_policy_talk(conn_dst, NULL, conn_src))
 				continue;
 
-			attach_flags = kdbus_meta_calc_attach_flags(conn_src,
-								    conn_dst);
-
-			/*
-			 * Keep sending messages even if we cannot acquire the
-			 * requested metadata. It's up to the receiver to drop
-			 * messages that lack expected metadata.
-			 */
-			if (!conn_src->faked_meta)
-				kdbus_meta_proc_collect(kmsg->proc_meta,
-							attach_flags);
-			kdbus_meta_conn_collect(kmsg->conn_meta, kmsg, conn_src,
-						attach_flags);
+			ret = kdbus_kmsg_collect_metadata(kmsg, conn_src,
+							  conn_dst);
+			if (ret < 0) {
+				kdbus_conn_lost_message(conn_dst);
+				continue;
+			}
 		} else {
 			/*
 			 * Check if there is a policy db that prevents the
@@ -353,22 +344,13 @@ void kdbus_bus_eavesdrop(struct kdbus_bus *bus,
 
 	down_read(&bus->conn_rwlock);
 	list_for_each_entry(conn_dst, &bus->monitors_list, monitor_entry) {
-		/*
-		 * Collect metadata requested by the destination connection.
-		 * Ignore errors, as receivers need to check metadata
-		 * availability, anyway. So it's still better to send messages
-		 * that lack data, than to skip it entirely.
-		 */
 		if (conn_src) {
-			u64 attach_flags;
-
-			attach_flags = kdbus_meta_calc_attach_flags(conn_src,
-								    conn_dst);
-			if (!conn_src->faked_meta)
-				kdbus_meta_proc_collect(kmsg->proc_meta,
-							attach_flags);
-			kdbus_meta_conn_collect(kmsg->conn_meta, kmsg, conn_src,
-						attach_flags);
+			ret = kdbus_kmsg_collect_metadata(kmsg, conn_src,
+							  conn_dst);
+			if (ret < 0) {
+				kdbus_conn_lost_message(conn_dst);
+				continue;
+			}
 		}
 
 		ret = kdbus_conn_entry_insert(conn_src, conn_dst, kmsg, NULL);
@@ -383,7 +365,7 @@ void kdbus_bus_eavesdrop(struct kdbus_bus *bus,
  * @domain:		domain to operate on
  * @argp:		command payload
  *
- * Return: Newly created bus on success, ERR_PTR on failure.
+ * Return: NULL or newly created bus on success, ERR_PTR on failure.
  */
 struct kdbus_bus *kdbus_cmd_bus_make(struct kdbus_domain *domain,
 				     void __user *argp)
@@ -477,7 +459,7 @@ exit:
  * @conn:		connection to operate on
  * @argp:		command payload
  *
- * Return: 0 on success, negative error code on failure.
+ * Return: >=0 on success, negative error code on failure.
  */
 int kdbus_cmd_bus_creator_info(struct kdbus_conn *conn, void __user *argp)
 {

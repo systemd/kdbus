@@ -432,7 +432,7 @@ static int kdbus_conn_connect(struct kdbus_conn *conn, const char *name)
 	 * directly, and won't cause any notifications.
 	 */
 	if (!kdbus_conn_is_monitor(conn)) {
-		ret = kdbus_notify_id_change(conn->ep->bus, KDBUS_ITEM_ID_ADD,
+		ret = kdbus_notify_id_change(bus, KDBUS_ITEM_ID_ADD,
 					     conn->id, conn->flags);
 		if (ret < 0)
 			goto exit_disconnect;
@@ -753,7 +753,7 @@ void kdbus_conn_quota_dec(struct kdbus_conn *c, struct kdbus_user *u,
  *
  * kdbus is reliable. That means, we try hard to never lose messages. However,
  * memory is limited, so we cannot rely on transmissions to never fail.
- * Therefore, we use quota-limits to let callers know if there unicast message
+ * Therefore, we use quota-limits to let callers know if their unicast message
  * cannot be transmitted to a peer. This works fine for unicasts, but for
  * broadcasts we cannot make the caller handle the transmission failure.
  * Instead, we must let the destination know that it couldn't receive a
@@ -775,8 +775,6 @@ kdbus_conn_entry_make(struct kdbus_conn *conn_dst,
 		      const struct kdbus_kmsg *kmsg,
 		      struct kdbus_user *user)
 {
-	struct kdbus_queue_entry *entry;
-
 	/* The remote connection was disconnected */
 	if (!kdbus_conn_active(conn_dst))
 		return ERR_PTR(-ECONNRESET);
@@ -793,11 +791,7 @@ kdbus_conn_entry_make(struct kdbus_conn *conn_dst,
 	    kmsg->res && kmsg->res->fds_count > 0)
 		return ERR_PTR(-ECOMM);
 
-	entry = kdbus_queue_entry_new(conn_dst, kmsg, user);
-	if (IS_ERR(entry))
-		return entry;
-
-	return entry;
+	return kdbus_queue_entry_new(conn_dst, kmsg, user);
 }
 
 /*
@@ -1098,7 +1092,6 @@ static int kdbus_conn_reply(struct kdbus_conn *src, struct kdbus_kmsg *kmsg)
 	struct kdbus_reply *reply, *wake = NULL;
 	struct kdbus_conn *dst = NULL;
 	struct kdbus_bus *bus = src->ep->bus;
-	u64 attach;
 	int ret;
 
 	if (WARN_ON(kmsg->msg.dst_id == KDBUS_DST_ID_BROADCAST) ||
@@ -1131,15 +1124,7 @@ static int kdbus_conn_reply(struct kdbus_conn *src, struct kdbus_kmsg *kmsg)
 
 	/* attach metadata */
 
-	attach = kdbus_meta_calc_attach_flags(src, dst);
-
-	if (!src->faked_meta) {
-		ret = kdbus_meta_proc_collect(kmsg->proc_meta, attach);
-		if (ret < 0)
-			goto exit;
-	}
-
-	ret = kdbus_meta_conn_collect(kmsg->conn_meta, kmsg, src, attach);
+	ret = kdbus_kmsg_collect_metadata(kmsg, src, dst);
 	if (ret < 0)
 		goto exit;
 
@@ -1167,7 +1152,6 @@ static struct kdbus_reply *kdbus_conn_call(struct kdbus_conn *src,
 	struct kdbus_reply *wait = NULL;
 	struct kdbus_conn *dst = NULL;
 	struct kdbus_bus *bus = src->ep->bus;
-	u64 attach;
 	int ret;
 
 	if (WARN_ON(kmsg->msg.dst_id == KDBUS_DST_ID_BROADCAST) ||
@@ -1218,15 +1202,7 @@ static struct kdbus_reply *kdbus_conn_call(struct kdbus_conn *src,
 
 	/* attach metadata */
 
-	attach = kdbus_meta_calc_attach_flags(src, dst);
-
-	if (!src->faked_meta) {
-		ret = kdbus_meta_proc_collect(kmsg->proc_meta, attach);
-		if (ret < 0)
-			goto exit;
-	}
-
-	ret = kdbus_meta_conn_collect(kmsg->conn_meta, kmsg, src, attach);
+	ret = kdbus_kmsg_collect_metadata(kmsg, src, dst);
 	if (ret < 0)
 		goto exit;
 
@@ -1257,7 +1233,6 @@ static int kdbus_conn_unicast(struct kdbus_conn *src, struct kdbus_kmsg *kmsg)
 	struct kdbus_conn *dst = NULL;
 	struct kdbus_bus *bus = src->ep->bus;
 	bool is_signal = (kmsg->msg.flags & KDBUS_MSG_SIGNAL);
-	u64 attach;
 	int ret = 0;
 
 	if (WARN_ON(kmsg->msg.dst_id == KDBUS_DST_ID_BROADCAST) ||
@@ -1296,16 +1271,8 @@ static int kdbus_conn_unicast(struct kdbus_conn *src, struct kdbus_kmsg *kmsg)
 
 	/* attach metadata */
 
-	attach = kdbus_meta_calc_attach_flags(src, dst);
-
-	if (!src->faked_meta) {
-		ret = kdbus_meta_proc_collect(kmsg->proc_meta, attach);
-		if (ret < 0 && !is_signal)
-			goto exit;
-	}
-
-	ret = kdbus_meta_conn_collect(kmsg->conn_meta, kmsg, src, attach);
-	if (ret < 0 && !is_signal)
+	ret = kdbus_kmsg_collect_metadata(kmsg, src, dst);
+	if (ret < 0)
 		goto exit;
 
 	/* send message */
@@ -1588,10 +1555,8 @@ bool kdbus_conn_policy_see_notification(struct kdbus_conn *conn,
 	 *     to a peer if, and only if, that peer can see the name this
 	 *     notification is for.
 	 *
-	 * KDBUS_ITEM_ID_{ADD,REMOVE}: As new peers cannot have names, and all
-	 *     names are dropped before a peer is removed, those notifications
-	 *     cannot be seen on custom endpoints. Thus, we only pass them
-	 *     through on default endpoints.
+	 * KDBUS_ITEM_ID_{ADD,REMOVE}: Notifications for ID changes are
+	 *     broadcast to everyone, to allow tracking peers.
 	 */
 
 	switch (kmsg->notify_type) {
@@ -1603,7 +1568,7 @@ bool kdbus_conn_policy_see_notification(struct kdbus_conn *conn,
 
 	case KDBUS_ITEM_ID_ADD:
 	case KDBUS_ITEM_ID_REMOVE:
-		return !conn->ep->user;
+		return true;
 
 	default:
 		WARN(1, "Invalid type for notification broadcast: %llu\n",
@@ -1618,7 +1583,7 @@ bool kdbus_conn_policy_see_notification(struct kdbus_conn *conn,
  * @privileged:		Whether the caller is privileged
  * @argp:		Command payload
  *
- * Return: Newly created connection on success, ERR_PTR on failure.
+ * Return: NULL or newly created connection on success, ERR_PTR on failure.
  */
 struct kdbus_conn *kdbus_cmd_hello(struct kdbus_ep *ep, bool privileged,
 				   void __user *argp)
@@ -1705,7 +1670,7 @@ exit:
  *
  * The caller must not hold any active reference to @conn or this will deadlock.
  *
- * Return: 0 on success, negative error code on failure.
+ * Return: >=0 on success, negative error code on failure.
  */
 int kdbus_cmd_byebye_unlocked(struct kdbus_conn *conn, void __user *argp)
 {
@@ -1737,7 +1702,7 @@ int kdbus_cmd_byebye_unlocked(struct kdbus_conn *conn, void __user *argp)
  * @conn:		connection to operate on
  * @argp:		command payload
  *
- * Return: 0 on success, negative error code on failure.
+ * Return: >=0 on success, negative error code on failure.
  */
 int kdbus_cmd_conn_info(struct kdbus_conn *conn, void __user *argp)
 {
@@ -1867,7 +1832,7 @@ exit:
  * @conn:		connection to operate on
  * @argp:		command payload
  *
- * Return: 0 on success, negative error code on failure.
+ * Return: >=0 on success, negative error code on failure.
  */
 int kdbus_cmd_update(struct kdbus_conn *conn, void __user *argp)
 {
@@ -1964,7 +1929,7 @@ exit:
  * @f:			file this command was called on
  * @argp:		command payload
  *
- * Return: 0 on success, negative error code on failure.
+ * Return: >=0 on success, negative error code on failure.
  */
 int kdbus_cmd_send(struct kdbus_conn *conn, struct file *f, void __user *argp)
 {
@@ -1997,9 +1962,8 @@ int kdbus_cmd_send(struct kdbus_conn *conn, struct file *f, void __user *argp)
 
 	if (argv[1].item) {
 		cancel_fd = fget(argv[1].item->fds[0]);
-		if (IS_ERR(cancel_fd)) {
-			ret = PTR_ERR(cancel_fd);
-			cancel_fd = NULL;
+		if (!cancel_fd) {
+			ret = -EBADF;
 			goto exit;
 		}
 
@@ -2061,7 +2025,7 @@ exit:
  * @conn:		connection to operate on
  * @argp:		command payload
  *
- * Return: 0 on success, negative error code on failure.
+ * Return: >=0 on success, negative error code on failure.
  */
 int kdbus_cmd_recv(struct kdbus_conn *conn, void __user *argp)
 {
@@ -2184,7 +2148,7 @@ exit:
  * @conn:		connection to operate on
  * @argp:		command payload
  *
- * Return: 0 on success, negative error code on failure.
+ * Return: >=0 on success, negative error code on failure.
  */
 int kdbus_cmd_free(struct kdbus_conn *conn, void __user *argp)
 {

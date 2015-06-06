@@ -255,6 +255,13 @@ int kdbus_test_custom_endpoint(struct kdbus_test_env *env)
 	ep_conn = kdbus_hello(ep, 0, NULL, 0);
 	ASSERT_RETURN(ep_conn);
 
+	/* Check that the reader got the IdAdd notification */
+	ret = kdbus_msg_recv(reader, &msg, NULL);
+	ASSERT_RETURN(ret == 0);
+	ASSERT_RETURN(msg->items[0].type == KDBUS_ITEM_ID_ADD);
+	ASSERT_RETURN(msg->items[0].id_change.id == ep_conn->id);
+	kdbus_msg_free(msg);
+
 	/*
 	 * Add a name add match on the endpoint connection, acquire name from
 	 * the unfiltered connection, and make sure the filtered connection
@@ -283,7 +290,7 @@ int kdbus_test_custom_endpoint(struct kdbus_test_env *env)
 	ret = kdbus_conn_info(ep_conn, 0x0fffffffffffffffULL, NULL, 0, NULL);
 	ASSERT_RETURN(ret == -ENXIO);
 
-	/* Check that the reader did not receive anything */
+	/* Check that the reader did not receive the name notification */
 	ret = kdbus_msg_recv(reader, NULL, NULL);
 	ASSERT_RETURN(ret == -EAGAIN);
 
@@ -294,6 +301,10 @@ int kdbus_test_custom_endpoint(struct kdbus_test_env *env)
 	 */
 	ret = kdbus_name_release(env->conn, name);
 	ASSERT_RETURN(ret == 0);
+
+	/* Check that the reader did not receive the name notification */
+	ret = kdbus_msg_recv(reader, NULL, NULL);
+	ASSERT_RETURN(ret == -EAGAIN);
 
 	ret = update_endpoint(ep_fd, name);
 	ASSERT_RETURN(ret == 0);

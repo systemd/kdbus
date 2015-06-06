@@ -178,7 +178,7 @@
  *                   accessed by other callers to properly initialize
  *                   filesystem nodes.
  *
- *     * node->id: This is an unsigned 32bit integer allocated by an IDR. It is
+ *     * node->id: This is an unsigned 32bit integer allocated by an IDA. It is
  *                 always kept as small as possible during allocation and is
  *                 globally unique across all nodes allocated by this module. 0
  *                 is reserved as "not assigned" and is the default.
@@ -233,8 +233,7 @@
 #define KDBUS_NODE_NEW			(KDBUS_NODE_BIAS - 4)
 
 /* global unique ID mapping for kdbus nodes */
-static DEFINE_IDR(kdbus_node_idr);
-static DECLARE_RWSEM(kdbus_node_idr_lock);
+DEFINE_IDA(kdbus_node_ida);
 
 /**
  * kdbus_node_name_hash() - hash a name
@@ -337,15 +336,11 @@ int kdbus_node_link(struct kdbus_node *node, struct kdbus_node *parent,
 		node->hash = kdbus_node_name_hash(name);
 	}
 
-	down_write(&kdbus_node_idr_lock);
-	ret = idr_alloc(&kdbus_node_idr, node, 1, 0, GFP_KERNEL);
-	if (ret >= 0)
-		node->id = ret;
-	up_write(&kdbus_node_idr_lock);
-
+	ret = ida_simple_get(&kdbus_node_ida, 1, 0, GFP_KERNEL);
 	if (ret < 0)
 		return ret;
 
+	node->id = ret;
 	ret = 0;
 
 	if (parent) {
@@ -440,16 +435,8 @@ struct kdbus_node *kdbus_node_unref(struct kdbus_node *node)
 
 		if (node->free_cb)
 			node->free_cb(node);
-
-		down_write(&kdbus_node_idr_lock);
 		if (safe.id > 0)
-			idr_remove(&kdbus_node_idr, safe.id);
-		/* drop caches after last node to not leak memory on unload */
-		if (idr_is_empty(&kdbus_node_idr)) {
-			idr_destroy(&kdbus_node_idr);
-			idr_init(&kdbus_node_idr);
-		}
-		up_write(&kdbus_node_idr_lock);
+			ida_simple_remove(&kdbus_node_ida, safe.id);
 
 		kfree(safe.name);
 

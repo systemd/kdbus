@@ -637,7 +637,7 @@ int kdbus_queue_entry_move(struct kdbus_queue_entry *e,
 	lockdep_assert_held(&src->lock);
 	lockdep_assert_held(&dst->lock);
 
-	if (WARN_ON(IS_ERR(e->user)) || WARN_ON(list_empty(&e->entry)))
+	if (WARN_ON(list_empty(&e->entry)))
 		return -EINVAL;
 	if (src == dst)
 		return 0;

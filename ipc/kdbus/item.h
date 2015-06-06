@@ -16,8 +16,8 @@
 #define __KDBUS_ITEM_H
 
 #include <linux/kernel.h>
-
 #include <uapi/linux/kdbus.h>
+
 #include "util.h"
 
 /* generic access and iterators over a stream of items */

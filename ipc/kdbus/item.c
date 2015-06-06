@@ -96,12 +96,6 @@ int kdbus_item_validate(const struct kdbus_item *item)
 		break;
 
 	case KDBUS_ITEM_PAYLOAD_VEC:
-		if (payload_size != sizeof(struct kdbus_vec))
-			return -EINVAL;
-		if (item->vec.size == 0 || item->vec.size > SIZE_MAX)
-			return -EINVAL;
-		break;
-
 	case KDBUS_ITEM_PAYLOAD_OFF:
 		if (payload_size != sizeof(struct kdbus_vec))
 			return -EINVAL;

@@ -29,7 +29,6 @@
 #include <linux/uidgid.h>
 #include <linux/uio.h>
 #include <linux/user_namespace.h>
-#include <linux/version.h>
 
 #include "bus.h"
 #include "connection.h"
@@ -64,8 +63,7 @@
  * @root_path:		Root-FS path
  * @cmdline:		Command-line
  * @cgroup:		Full cgroup path
- * @caps:		Capabilities
- * @caps_namespace:	User-namespace of @caps
+ * @cred:		Credentials
  * @seclabel:		Seclabel
  * @audit_loginuid:	Audit login-UID
  * @audit_sessionid:	Audit session-ID
@@ -105,14 +103,7 @@ struct kdbus_meta_proc {
 	char *cgroup;
 
 	/* KDBUS_ITEM_CAPS */
-	struct caps {
-		/* binary compatible to kdbus_caps */
-		u32 last_cap;
-		struct {
-			u32 caps[_KERNEL_CAPABILITY_U32S];
-		} set[4];
-	} caps;
-	struct user_namespace *caps_namespace;
+	const struct cred *cred;
 
 	/* KDBUS_ITEM_SECLABEL */
 	char *seclabel;
@@ -150,6 +141,14 @@ struct kdbus_meta_conn {
 	char *conn_description;
 };
 
+/* fixed size equivalent of "kdbus_caps" */
+struct kdbus_meta_caps {
+	u32 last_cap;
+	struct {
+		u32 caps[_KERNEL_CAPABILITY_U32S];
+	} set[4];
+};
+
 /**
  * kdbus_meta_proc_new() - Create process metadata object
  *
@@ -176,7 +175,8 @@ static void kdbus_meta_proc_free(struct kref *kref)
 
 	path_put(&mp->exe_path);
 	path_put(&mp->root_path);
-	put_user_ns(mp->caps_namespace);
+	if (mp->cred)
+		put_cred(mp->cred);
 	put_pid(mp->ppid);
 	put_pid(mp->tgid);
 	put_pid(mp->pid);
@@ -246,25 +246,23 @@ static void kdbus_meta_proc_collect_pids(struct kdbus_meta_proc *mp)
 
 static int kdbus_meta_proc_collect_auxgroups(struct kdbus_meta_proc *mp)
 {
-	struct group_info *info;
+	const struct group_info *info;
 	size_t i;
 
-	info = get_current_groups();
+	/* no need to lock/ref, current creds cannot change */
+	info = current_cred()->group_info;
 
 	if (info->ngroups > 0) {
 		mp->auxgrps = kmalloc_array(info->ngroups, sizeof(kgid_t),
 					    GFP_KERNEL);
-		if (!mp->auxgrps) {
-			put_group_info(info);
+		if (!mp->auxgrps)
 			return -ENOMEM;
-		}
 
 		for (i = 0; i < info->ngroups; i++)
 			mp->auxgrps[i] = GROUP_AT(info, i);
 	}
 
 	mp->n_auxgrps = info->ngroups;
-	put_group_info(info);
 	mp->valid |= KDBUS_ATTACH_AUXGROUPS;
 
 	return 0;
@@ -284,42 +282,29 @@ static void kdbus_meta_proc_collect_pid_comm(struct kdbus_meta_proc *mp)
 
 static void kdbus_meta_proc_collect_exe(struct kdbus_meta_proc *mp)
 {
-	struct mm_struct *mm;
+	struct file *exe_file;
 
-	mm = get_task_mm(current);
-	if (!mm)
-		return;
-
-	down_read(&mm->mmap_sem);
-	if (mm->exe_file) {
-		mp->exe_path = mm->exe_file->f_path;
+	rcu_read_lock();
+	exe_file = rcu_dereference(current->mm->exe_file);
+	if (exe_file) {
+		mp->exe_path = exe_file->f_path;
 		path_get(&mp->exe_path);
 		get_fs_root(current->fs, &mp->root_path);
 		mp->valid |= KDBUS_ATTACH_EXE;
 	}
-	up_read(&mm->mmap_sem);
-
-	mmput(mm);
+	rcu_read_unlock();
 }
 
 static int kdbus_meta_proc_collect_cmdline(struct kdbus_meta_proc *mp)
 {
-	struct mm_struct *mm;
+	struct mm_struct *mm = current->mm;
 	char *cmdline;
 
-	mm = get_task_mm(current);
-	if (!mm)
+	if (!mm->arg_end)
 		return 0;
-
-	if (!mm->arg_end) {
-		mmput(mm);
-		return 0;
-	}
 
 	cmdline = strndup_user((const char __user *)mm->arg_start,
 			       mm->arg_end - mm->arg_start);
-	mmput(mm);
-
 	if (IS_ERR(cmdline))
 		return PTR_ERR(cmdline);
 
@@ -357,25 +342,7 @@ static int kdbus_meta_proc_collect_cgroup(struct kdbus_meta_proc *mp)
 
 static void kdbus_meta_proc_collect_caps(struct kdbus_meta_proc *mp)
 {
-	const struct cred *c = current_cred();
-	int i;
-
-	/* ABI: "last_cap" equals /proc/sys/kernel/cap_last_cap */
-	mp->caps.last_cap = CAP_LAST_CAP;
-	mp->caps_namespace = get_user_ns(current_user_ns());
-
-	CAP_FOR_EACH_U32(i) {
-		mp->caps.set[0].caps[i] = c->cap_inheritable.cap[i];
-		mp->caps.set[1].caps[i] = c->cap_permitted.cap[i];
-		mp->caps.set[2].caps[i] = c->cap_effective.cap[i];
-		mp->caps.set[3].caps[i] = c->cap_bset.cap[i];
-	}
-
-	/* clear unused bits */
-	for (i = 0; i < 4; i++)
-		mp->caps.set[i].caps[CAP_TO_INDEX(CAP_LAST_CAP)] &=
-						CAP_LAST_U32_VALID_MASK;
-
+	mp->cred = get_current_cred();
 	mp->valid |= KDBUS_ATTACH_CAPS;
 }
 
@@ -678,13 +645,8 @@ struct kdbus_meta_conn *kdbus_meta_conn_unref(struct kdbus_meta_conn *mc)
 static void kdbus_meta_conn_collect_timestamp(struct kdbus_meta_conn *mc,
 					      struct kdbus_kmsg *kmsg)
 {
-	struct timespec ts;
-
-	ktime_get_ts(&ts);
-	mc->ts.monotonic_ns = timespec_to_ns(&ts);
-
-	ktime_get_real_ts(&ts);
-	mc->ts.realtime_ns = timespec_to_ns(&ts);
+	mc->ts.monotonic_ns = ktime_get_ns();
+	mc->ts.realtime_ns = ktime_get_real_ns();
 
 	if (kmsg)
 		mc->ts.seqnum = kmsg->seq;
@@ -843,7 +805,6 @@ int kdbus_meta_export_prepare(struct kdbus_meta_proc *mp,
 	}
 
 	*mask &= valid;
-	*mask &= kdbus_meta_attach_mask;
 
 	if (!*mask)
 		goto exit;
@@ -889,7 +850,7 @@ int kdbus_meta_export_prepare(struct kdbus_meta_proc *mp,
 		size += KDBUS_ITEM_SIZE(strlen(mp->cgroup) + 1);
 
 	if (mp && (*mask & KDBUS_ATTACH_CAPS))
-		size += KDBUS_ITEM_SIZE(sizeof(mp->caps));
+		size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_meta_caps));
 
 	if (mp && (*mask & KDBUS_ATTACH_SECLABEL))
 		size += KDBUS_ITEM_SIZE(strlen(mp->seclabel) + 1);
@@ -924,6 +885,69 @@ static int kdbus_meta_push_kvec(struct kvec *kvec,
 	kdbus_kvec_set(kvec++, hdr, sizeof(*hdr), size);
 	kdbus_kvec_set(kvec++, payload, payload_size, size);
 	return 2 + !!kdbus_kvec_pad(kvec++, size);
+}
+
+static void kdbus_meta_export_caps(struct kdbus_meta_caps *out,
+				   struct kdbus_meta_proc *mp)
+{
+	struct user_namespace *iter;
+	const struct cred *cred = mp->cred;
+	bool parent = false, owner = false;
+	int i;
+
+	/*
+	 * This translates the effective capabilities of 'cred' into the current
+	 * user-namespace. If the current user-namespace is a child-namespace of
+	 * the user-namespace of 'cred', the mask can be copied verbatim. If
+	 * not, the mask is cleared.
+	 * There's one exception: If 'cred' is the owner of any user-namespace
+	 * in the path between the current user-namespace and the user-namespace
+	 * of 'cred', then it has all effective capabilities set. This means,
+	 * the user who created a user-namespace always has all effective
+	 * capabilities in any child namespaces. Note that this is based on the
+	 * uid of the namespace creator, not the task hierarchy.
+	 */
+	for (iter = current_user_ns(); iter; iter = iter->parent) {
+		if (iter == cred->user_ns) {
+			parent = true;
+			break;
+		}
+
+		if (iter == &init_user_ns)
+			break;
+
+		if ((iter->parent == cred->user_ns) &&
+		    uid_eq(iter->owner, cred->euid)) {
+			owner = true;
+			break;
+		}
+	}
+
+	out->last_cap = CAP_LAST_CAP;
+
+	CAP_FOR_EACH_U32(i) {
+		if (parent) {
+			out->set[0].caps[i] = cred->cap_inheritable.cap[i];
+			out->set[1].caps[i] = cred->cap_permitted.cap[i];
+			out->set[2].caps[i] = cred->cap_effective.cap[i];
+			out->set[3].caps[i] = cred->cap_bset.cap[i];
+		} else if (owner) {
+			out->set[0].caps[i] = 0U;
+			out->set[1].caps[i] = ~0U;
+			out->set[2].caps[i] = ~0U;
+			out->set[3].caps[i] = ~0U;
+		} else {
+			out->set[0].caps[i] = 0U;
+			out->set[1].caps[i] = 0U;
+			out->set[2].caps[i] = 0U;
+			out->set[3].caps[i] = 0U;
+		}
+	}
+
+	/* clear unused bits */
+	for (i = 0; i < 4; i++)
+		out->set[i].caps[CAP_TO_INDEX(CAP_LAST_CAP)] &=
+					CAP_LAST_U32_VALID_MASK;
 }
 
 /* This is equivalent to from_kuid_munged(), but maps INVALID_UID to itself */
@@ -983,14 +1007,6 @@ int kdbus_meta_export(struct kdbus_meta_proc *mp,
 	int ret = 0;
 
 	hdr = &item_hdr[0];
-
-	/*
-	 * TODO: We currently have no sane way of translating a set of caps
-	 * between different user namespaces. Until that changes, we have
-	 * to drop such items.
-	 */
-	if (mp && mp->caps_namespace != user_ns)
-		mask &= ~KDBUS_ATTACH_CAPS;
 
 	if (mask == 0) {
 		*real_size = 0;
@@ -1097,10 +1113,14 @@ int kdbus_meta_export(struct kdbus_meta_proc *mp,
 					    KDBUS_ITEM_CGROUP, mp->cgroup,
 					    strlen(mp->cgroup) + 1, &size);
 
-	if (mp && (mask & KDBUS_ATTACH_CAPS))
+	if (mp && (mask & KDBUS_ATTACH_CAPS)) {
+		struct kdbus_meta_caps caps = {};
+
+		kdbus_meta_export_caps(&caps, mp);
 		cnt += kdbus_meta_push_kvec(kvec + cnt, hdr++,
-					    KDBUS_ITEM_CAPS, &mp->caps,
-					    sizeof(mp->caps), &size);
+					    KDBUS_ITEM_CAPS, &caps,
+					    sizeof(caps), &size);
+	}
 
 	if (mp && (mask & KDBUS_ATTACH_SECLABEL))
 		cnt += kdbus_meta_push_kvec(kvec + cnt, hdr++,

@@ -368,7 +368,7 @@ static int kdbus_match_db_remove_unlocked(struct kdbus_match_db *mdb,
  * are used to match messages from userspace, while the others apply to
  * kernel-generated notifications.
  *
- * Return: 0 on success, negative error code on failure.
+ * Return: >=0 on success, negative error code on failure.
  */
 int kdbus_cmd_match_add(struct kdbus_conn *conn, void __user *argp)
 {
@@ -528,7 +528,7 @@ exit:
  * @conn:		connection to operate on
  * @argp:		command payload
  *
- * Return: 0 on success, negative error code on failure.
+ * Return: >=0 on success, negative error code on failure.
  */
 int kdbus_cmd_match_remove(struct kdbus_conn *conn, void __user *argp)
 {

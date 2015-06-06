@@ -11,7 +11,6 @@ OBJS= \
 	kdbus-test.o		\
 	kdbus-test.o		\
 	test-activator.o	\
-	test-attach-flags.o	\
 	test-benchmark.o	\
 	test-bus.o		\
 	test-chat.o		\
@@ -35,11 +34,13 @@ all: kdbus-test
 
 include ../lib.mk
 
-%.o: %.c
+%.o: %.c kdbus-enum.h kdbus-test.h kdbus-util.h
 	$(CC) $(CFLAGS) -c $< -o $@
 
 kdbus-test: $(OBJS)
 	$(CC) $(CFLAGS) $^ $(LDLIBS) -o $@
+
+TEST_PROGS := kdbus-test
 
 run_tests:
 	./kdbus-test --tap

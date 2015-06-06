@@ -188,7 +188,7 @@ struct kdbus_ep *kdbus_ep_unref(struct kdbus_ep *ep)
  * @bus:		bus to operate on
  * @argp:		command payload
  *
- * Return: Newly created endpoint on success, ERR_PTR on failure.
+ * Return: NULL or newly created endpoint on success, ERR_PTR on failure.
  */
 struct kdbus_ep *kdbus_cmd_ep_make(struct kdbus_bus *bus, void __user *argp)
 {
@@ -247,7 +247,7 @@ exit:
  * @ep:			endpoint to operate on
  * @argp:		command payload
  *
- * Return: Newly created endpoint on success, ERR_PTR on failure.
+ * Return: >=0 on success, negative error code on failure.
  */
 int kdbus_cmd_ep_update(struct kdbus_ep *ep, void __user *argp)
 {

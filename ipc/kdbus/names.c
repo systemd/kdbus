@@ -469,7 +469,7 @@ void kdbus_name_release_all(struct kdbus_name_registry *reg,
  * @conn:		connection to operate on
  * @argp:		command payload
  *
- * Return: 0 on success, negative error code on failure.
+ * Return: >=0 on success, negative error code on failure.
  */
 int kdbus_cmd_name_acquire(struct kdbus_conn *conn, void __user *argp)
 {
@@ -528,7 +528,7 @@ exit:
  * @conn:		connection to operate on
  * @argp:		command payload
  *
- * Return: 0 on success, negative error code on failure.
+ * Return: >=0 on success, negative error code on failure.
  */
 int kdbus_cmd_name_release(struct kdbus_conn *conn, void __user *argp)
 {
@@ -699,7 +699,7 @@ static int kdbus_list_all(struct kdbus_conn *conn, u64 flags,
  * @conn:		connection to operate on
  * @argp:		command payload
  *
- * Return: 0 on success, negative error code on failure.
+ * Return: >=0 on success, negative error code on failure.
  */
 int kdbus_cmd_list(struct kdbus_conn *conn, void __user *argp)
 {

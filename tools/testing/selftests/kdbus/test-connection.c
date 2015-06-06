@@ -185,13 +185,10 @@ static int kdbus_fuzz_conn_info(struct kdbus_test_env *env, int capable)
 	int ret;
 	unsigned int cnt = 0;
 	uint64_t offset = 0;
-	uint64_t kdbus_flags_mask;
 	struct kdbus_info *info;
 	struct kdbus_conn *conn;
 	struct kdbus_conn *privileged;
 	const struct kdbus_item *item;
-	uint64_t valid_flags_set;
-	uint64_t invalid_flags_set;
 	uint64_t valid_flags = KDBUS_ATTACH_NAMES |
 			       KDBUS_ATTACH_CREDS |
 			       KDBUS_ATTACH_PIDS |
@@ -227,13 +224,6 @@ static int kdbus_fuzz_conn_info(struct kdbus_test_env *env, int capable)
 		.ppid	= getppid(),
 	};
 
-	ret = kdbus_sysfs_get_parameter_mask(env->mask_param_path,
-					     &kdbus_flags_mask);
-	ASSERT_RETURN(ret == 0);
-
-	valid_flags_set = valid_flags & kdbus_flags_mask;
-	invalid_flags_set = invalid_flags & kdbus_flags_mask;
-
 	ret = kdbus_conn_info(env->conn, env->conn->id, NULL,
 			      valid_flags, &offset);
 	ASSERT_RETURN(ret == 0);
@@ -246,7 +236,7 @@ static int kdbus_fuzz_conn_info(struct kdbus_test_env *env, int capable)
 	ASSERT_RETURN(item == NULL);
 
 	item = kdbus_get_item(info, KDBUS_ITEM_CONN_DESCRIPTION);
-	if (valid_flags_set & KDBUS_ATTACH_CONN_DESCRIPTION) {
+	if (valid_flags & KDBUS_ATTACH_CONN_DESCRIPTION) {
 		ASSERT_RETURN(item);
 	} else {
 		ASSERT_RETURN(item == NULL);
@@ -271,7 +261,7 @@ static int kdbus_fuzz_conn_info(struct kdbus_test_env *env, int capable)
 	ASSERT_RETURN(item == NULL);
 
 	cnt = kdbus_count_item(info, KDBUS_ITEM_CREDS);
-	if (valid_flags_set & KDBUS_ATTACH_CREDS) {
+	if (valid_flags & KDBUS_ATTACH_CREDS) {
 		ASSERT_RETURN(cnt == 1);
 
 		item = kdbus_get_item(info, KDBUS_ITEM_CREDS);
@@ -285,7 +275,7 @@ static int kdbus_fuzz_conn_info(struct kdbus_test_env *env, int capable)
 	}
 
 	item = kdbus_get_item(info, KDBUS_ITEM_PIDS);
-	if (valid_flags_set & KDBUS_ATTACH_PIDS) {
+	if (valid_flags & KDBUS_ATTACH_PIDS) {
 		ASSERT_RETURN(item);
 
 		/* Compare item->pids with cached PIDs */
@@ -312,7 +302,7 @@ static int kdbus_fuzz_conn_info(struct kdbus_test_env *env, int capable)
 	ASSERT_RETURN(info->id == conn->id);
 
 	item = kdbus_get_item(info, KDBUS_ITEM_OWNED_NAME);
-	if (valid_flags_set & KDBUS_ATTACH_NAMES) {
+	if (valid_flags & KDBUS_ATTACH_NAMES) {
 		ASSERT_RETURN(item && !strcmp(item->name.name, "com.example.a"));
 	} else {
 		ASSERT_RETURN(item == NULL);
@@ -340,14 +330,14 @@ static int kdbus_fuzz_conn_info(struct kdbus_test_env *env, int capable)
 		info = (struct kdbus_info *)(conn->buf + offset);
 		ASSERT_EXIT(info->id == conn->id);
 
-		if (valid_flags_set & KDBUS_ATTACH_NAMES) {
+		if (valid_flags & KDBUS_ATTACH_NAMES) {
 			item = kdbus_get_item(info, KDBUS_ITEM_OWNED_NAME);
 			ASSERT_EXIT(item &&
 				    strcmp(item->name.name,
 				           "com.example.a") == 0);
 		}
 
-		if (valid_flags_set & KDBUS_ATTACH_CREDS) {
+		if (valid_flags & KDBUS_ATTACH_CREDS) {
 			item = kdbus_get_item(info, KDBUS_ITEM_CREDS);
 			ASSERT_EXIT(item);
 
@@ -356,7 +346,7 @@ static int kdbus_fuzz_conn_info(struct kdbus_test_env *env, int capable)
 				    sizeof(struct kdbus_creds)) == 0);
 		}
 
-		if (valid_flags_set & KDBUS_ATTACH_PIDS) {
+		if (valid_flags & KDBUS_ATTACH_PIDS) {
 			item = kdbus_get_item(info, KDBUS_ITEM_PIDS);
 			ASSERT_EXIT(item);
 
@@ -385,7 +375,7 @@ static int kdbus_fuzz_conn_info(struct kdbus_test_env *env, int capable)
 		 * it points to the cached creds.
 		 */
 		cnt = kdbus_count_item(info, KDBUS_ITEM_CREDS);
-		if (invalid_flags_set & KDBUS_ATTACH_CREDS) {
+		if (invalid_flags & KDBUS_ATTACH_CREDS) {
 			ASSERT_EXIT(cnt == 1);
 
 			item = kdbus_get_item(info, KDBUS_ITEM_CREDS);
@@ -398,7 +388,7 @@ static int kdbus_fuzz_conn_info(struct kdbus_test_env *env, int capable)
 			ASSERT_EXIT(cnt == 0);
 		}
 
-		if (invalid_flags_set & KDBUS_ATTACH_PIDS) {
+		if (invalid_flags & KDBUS_ATTACH_PIDS) {
 			cnt = kdbus_count_item(info, KDBUS_ITEM_PIDS);
 			ASSERT_EXIT(cnt == 1);
 
@@ -411,14 +401,14 @@ static int kdbus_fuzz_conn_info(struct kdbus_test_env *env, int capable)
 		}
 
 		cnt = kdbus_count_item(info, KDBUS_ITEM_CGROUP);
-		if (invalid_flags_set & KDBUS_ATTACH_CGROUP) {
+		if (invalid_flags & KDBUS_ATTACH_CGROUP) {
 			ASSERT_EXIT(cnt == 1);
 		} else {
 			ASSERT_EXIT(cnt == 0);
 		}
 
 		cnt = kdbus_count_item(info, KDBUS_ITEM_CAPS);
-		if (invalid_flags_set & KDBUS_ATTACH_CAPS) {
+		if (invalid_flags & KDBUS_ATTACH_CAPS) {
 			ASSERT_EXIT(cnt == 1);
 		} else {
 			ASSERT_EXIT(cnt == 0);
@@ -442,7 +432,7 @@ continue_test:
 	ASSERT_RETURN(info->id == conn->id);
 
 	cnt = kdbus_count_item(info, KDBUS_ITEM_OWNED_NAME);
-	if (valid_flags_set & KDBUS_ATTACH_NAMES) {
+	if (valid_flags & KDBUS_ATTACH_NAMES) {
 		ASSERT_RETURN(cnt == 2);
 	} else {
 		ASSERT_RETURN(cnt == 0);

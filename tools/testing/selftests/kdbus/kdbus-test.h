@@ -5,7 +5,6 @@ struct kdbus_test_env {
 	char *buspath;
 	const char *root;
 	const char *module;
-	const char *mask_param_path;
 	int control_fd;
 	struct kdbus_conn *conn;
 };
@@ -44,7 +43,6 @@ enum {
 	ASSERT_EXIT_VAL(cond, EXIT_FAILURE)
 
 int kdbus_test_activator(struct kdbus_test_env *env);
-int kdbus_test_attach_flags(struct kdbus_test_env *env);
 int kdbus_test_benchmark(struct kdbus_test_env *env);
 int kdbus_test_benchmark_nomemfds(struct kdbus_test_env *env);
 int kdbus_test_benchmark_uds(struct kdbus_test_env *env);

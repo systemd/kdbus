@@ -614,3 +614,27 @@ exit_free:
 	kdbus_kmsg_free(m);
 	return ERR_PTR(ret);
 }
+
+/**
+ * kdbus_kmsg_collect_metadata() - collect metadata
+ * @kmsg:	message to collect metadata on
+ * @src:	source connection of message
+ * @dst:	destination connection of message
+ *
+ * Return: 0 on success, negative error code on failure.
+ */
+int kdbus_kmsg_collect_metadata(struct kdbus_kmsg *kmsg, struct kdbus_conn *src,
+				struct kdbus_conn *dst)
+{
+	u64 attach;
+	int ret;
+
+	attach = kdbus_meta_calc_attach_flags(src, dst);
+	if (!src->faked_meta) {
+		ret = kdbus_meta_proc_collect(kmsg->proc_meta, attach);
+		if (ret < 0)
+			return ret;
+	}
+
+	return kdbus_meta_conn_collect(kmsg->conn_meta, kmsg, src, attach);
+}

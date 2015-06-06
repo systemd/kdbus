@@ -27,7 +27,6 @@
 #include <linux/slab.h>
 #include <linux/uaccess.h>
 #include <linux/uio.h>
-#include <linux/version.h>
 
 #include "pool.h"
 #include "util.h"
@@ -580,29 +579,6 @@ ssize_t
 kdbus_pool_slice_copy_iovec(const struct kdbus_pool_slice *slice, loff_t off,
 			    struct iovec *iov, size_t iov_len, size_t total_len)
 {
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)
-	struct file *f = slice->pool->f;
-	struct iov_iter iter;
-	struct kiocb kiocb;
-	ssize_t len;
-
-	if (WARN_ON(off + total_len > slice->size))
-		return -EFAULT;
-
-	init_sync_kiocb(&kiocb, f);
-	kiocb.ki_pos = slice->off + off;
-	kiocb.ki_nbytes = total_len;
-	iov_iter_init(&iter, WRITE, iov, iov_len, total_len);
-
-	len = f->f_op->write_iter(&kiocb, &iter);
-	if (len < 0)
-		return len;
-
-	if (len != total_len)
-		return -EFAULT;
-
-	return len;
-#else
 	struct iov_iter iter;
 	ssize_t len;
 
@@ -612,8 +588,8 @@ kdbus_pool_slice_copy_iovec(const struct kdbus_pool_slice *slice, loff_t off,
 	off += slice->off;
 	iov_iter_init(&iter, WRITE, iov, iov_len, total_len);
 	len = vfs_iter_write(slice->pool->f, &iter, &off);
+
 	return (len >= 0 && len != total_len) ? -EFAULT : len;
-#endif
 }
 
 /**
@@ -632,34 +608,6 @@ ssize_t kdbus_pool_slice_copy_kvec(const struct kdbus_pool_slice *slice,
 				   loff_t off, struct kvec *kvec,
 				   size_t kvec_len, size_t total_len)
 {
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)
-	struct file *f = slice->pool->f;
-	struct iov_iter iter;
-	mm_segment_t old_fs;
-	struct kiocb kiocb;
-	ssize_t len;
-
-	if (WARN_ON(off + total_len > slice->size))
-		return -EFAULT;
-
-	old_fs = get_fs();
-	set_fs(get_ds());
-
-	init_sync_kiocb(&kiocb, f);
-	kiocb.ki_pos = slice->off + off;
-	kiocb.ki_nbytes = total_len;
-	iov_iter_kvec(&iter, WRITE | ITER_KVEC, kvec, kvec_len, total_len);
-	len = f->f_op->write_iter(&kiocb, &iter);
-	set_fs(old_fs);
-
-	if (len < 0)
-		return len;
-
-	if (len != total_len)
-		return -EFAULT;
-
-	return len;
-#else
 	struct iov_iter iter;
 	mm_segment_t old_fs;
 	ssize_t len;
@@ -676,7 +624,6 @@ ssize_t kdbus_pool_slice_copy_kvec(const struct kdbus_pool_slice *slice,
 	set_fs(old_fs);
 
 	return (len >= 0 && len != total_len) ? -EFAULT : len;
-#endif
 }
 
 /**
@@ -728,7 +675,7 @@ int kdbus_pool_slice_copy(const struct kdbus_pool_slice *slice_dst,
 		}
 
 		kaddr = (char __force __user *)kmap(page) + page_off;
-		n_read = f_src->f_op->read(f_src, kaddr, copy_len, &off_src);
+		n_read = __vfs_read(f_src, kaddr, copy_len, &off_src);
 		kunmap(page);
 		mark_page_accessed(page);
 		flush_dcache_page(page);

@@ -40,7 +40,7 @@
 ({									\
 	u64 __user *_sz =						\
 		(void __user *)((u8 __user *)(_b) + offsetof(_t, _m));	\
-	copy_to_user(_sz, _s, sizeof(((_t *)0)->_m));			\
+	copy_to_user(_sz, _s, FIELD_SIZEOF(_t, _m));			\
 })
 
 /**
@@ -64,7 +64,6 @@ int kdbus_verify_uid_prefix(const char *name, struct user_namespace *user_ns,
 int kdbus_sanitize_attach_flags(u64 flags, u64 *attach_flags);
 
 int kdbus_copy_from_user(void *dest, void __user *user_ptr, size_t size);
-void *kdbus_memdup_user(void __user *user_ptr, size_t sz_min, size_t sz_max);
 
 struct kvec;
 

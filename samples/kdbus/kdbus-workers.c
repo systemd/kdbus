@@ -57,6 +57,12 @@
  * top-down, but requires some forward-declarations. Just ignore those.
  */
 
+#include <stdio.h>
+#include <stdlib.h>
+
+/* glibc < 2.7 does not ship sys/signalfd.h */
+#if __GLIBC__ >= 2 && __GLIBC_MINOR__ >= 7
+
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -65,8 +71,6 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/poll.h>
@@ -787,8 +791,8 @@ static int child_run(struct child *c)
 	 * The 2nd item contains a vector to memory we want to send. It
 	 * can be content of any type. In our case, we're sending a one-byte
 	 * string only. The memory referenced by this item will be copied into
-	 * the pool of the receveiver connection, and does not need to be
-	 * valid after the command is employed.
+	 * the pool of the receiver connection, and does not need to be valid
+	 * after the command is employed.
 	 */
 	item = KDBUS_ITEM_NEXT(item);
 	item->type = KDBUS_ITEM_PAYLOAD_VEC;
@@ -1324,3 +1328,18 @@ static int bus_make(uid_t uid, const char *name)
 
 	return fd;
 }
+
+#else
+
+#warning "Skipping compilation due to unsupported libc version"
+
+int main(int argc, char **argv)
+{
+	fprintf(stderr,
+		"Compilation of %s was skipped due to unsupported libc.\n",
+		argv[0]);
+
+	return EXIT_FAILURE;
+}
+
+#endif /* libc sanity check */

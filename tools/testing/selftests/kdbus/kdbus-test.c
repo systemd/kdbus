@@ -48,7 +48,6 @@ struct kdbus_test_args {
 	char *root;
 	char *test;
 	char *busname;
-	char *mask_param_path;
 };
 
 static const struct kdbus_test tests[] = {
@@ -274,13 +273,6 @@ static const struct kdbus_test tests[] = {
 		.func	= kdbus_test_benchmark_uds,
 		.flags	= TEST_CREATE_BUS,
 	},
-	{
-		/* Last test */
-		.name	= "attach-flags",
-		.desc	= "attach flags mask",
-		.func	= kdbus_test_attach_flags,
-		.flags	= 0,
-	},
 };
 
 #define N_TESTS ((int) (sizeof(tests) / sizeof(tests[0])))
@@ -323,7 +315,6 @@ static int test_prepare_env(const struct kdbus_test *t,
 
 	env->root = args->root;
 	env->module = args->module;
-	env->mask_param_path = args->mask_param_path;
 
 	return 0;
 }
@@ -754,8 +745,7 @@ int start_tests(struct kdbus_test_args *kdbus_args)
 {
 	int ret;
 	bool namespaces;
-	uint64_t kdbus_param_mask;
-	static char fspath[4096], parampath[4096];
+	static char fspath[4096];
 
 	namespaces = (kdbus_args->mntns || kdbus_args->pidns ||
 		      kdbus_args->userns);
@@ -790,19 +780,6 @@ int start_tests(struct kdbus_test_args *kdbus_args)
 			 kdbus_args->module);
 		kdbus_args->root = fspath;
 	}
-
-	snprintf(parampath, sizeof(parampath),
-		 "/sys/module/%s/parameters/attach_flags_mask",
-		 kdbus_args->module);
-	kdbus_args->mask_param_path = parampath;
-
-	ret = kdbus_sysfs_get_parameter_mask(kdbus_args->mask_param_path,
-					     &kdbus_param_mask);
-	if (ret < 0)
-		return TEST_ERR;
-
-	printf("# Starting tests with an attach_flags_mask=0x%llx\n",
-		(unsigned long long)kdbus_param_mask);
 
 	/* Start tests */
 	if (namespaces)

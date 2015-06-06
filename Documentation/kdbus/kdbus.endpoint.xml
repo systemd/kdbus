@@ -201,7 +201,7 @@ struct kdbus_cmd {
     <para>
       To update an existing endpoint, the
       <constant>KDBUS_CMD_ENDPOINT_UPDATE</constant> command is used on the file
-      descriptor that was used to create the update, using
+      descriptor that was used to create the endpoint, using
       <constant>KDBUS_CMD_ENDPOINT_MAKE</constant>. The only relevant detail of
       the endpoint that can be updated is the policy. When the command is
       employed, the policy of the endpoint is <emphasis>replaced</emphasis>
@@ -367,13 +367,6 @@ struct kdbus_cmd {
           <listitem><para>
             Illegal combination of <constant>KDBUS_ITEM_NAME</constant> and
             <constant>KDBUS_ITEM_POLICY_ACCESS</constant> was provided.
-          </para></listitem>
-        </varlistentry>
-
-        <varlistentry>
-          <term><constant>EEXIST</constant></term>
-          <listitem><para>
-            An endpoint of that name already exists.
           </para></listitem>
         </varlistentry>
       </variablelist>

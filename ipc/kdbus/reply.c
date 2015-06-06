@@ -140,8 +140,7 @@ void kdbus_reply_unlink(struct kdbus_reply *r)
  * @reply:	The reply object
  * @err:	Error code to set on the remote side
  *
- * Remove the synchronous reply object from its connection reply_list, and
- * wake up remote peer (method origin) with the appropriate synchronous reply
+ * Wake up remote peer (method origin) with the appropriate synchronous reply
  * code.
  */
 void kdbus_sync_reply_wakeup(struct kdbus_reply *reply, int err)
@@ -204,11 +203,9 @@ void kdbus_reply_list_scan_work(struct work_struct *work)
 		container_of(work, struct kdbus_conn, work.work);
 	struct kdbus_reply *reply, *reply_tmp;
 	u64 deadline = ~0ULL;
-	struct timespec64 ts;
 	u64 now;
 
-	ktime_get_ts64(&ts);
-	now = timespec64_to_ns(&ts);
+	now = ktime_get_ns();
 
 	mutex_lock(&conn->lock);
 	if (!kdbus_conn_active(conn)) {
