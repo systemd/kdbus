@@ -29,15 +29,15 @@
 #define KDBUS_ITEM_NEXT(item) \
 	(typeof(item))((uint8_t *)(item) + KDBUS_ALIGN8((item)->size))
 #define KDBUS_ITEM_FOREACH(item, head, first)				\
-	for (item = (head)->first;					\
+	for ((item) = (head)->first;					\
 	     ((uint8_t *)(item) < (uint8_t *)(head) + (head)->size) &&	\
 	       ((uint8_t *)(item) >= (uint8_t *)(head));		\
-	     item = KDBUS_ITEM_NEXT(item))
+	     (item) = KDBUS_ITEM_NEXT(item))
 #define KDBUS_FOREACH(iter, first, _size)				\
-	for (iter = (first);						\
+	for ((iter) = (first);						\
 	     ((uint8_t *)(iter) < (uint8_t *)(first) + (_size)) &&	\
 	       ((uint8_t *)(iter) >= (uint8_t *)(first));		\
-	     iter = (void *)(((uint8_t *)iter) + KDBUS_ALIGN8((iter)->size)))
+	     (iter) = (void *)((uint8_t *)(iter) + KDBUS_ALIGN8((iter)->size)))
 
 #define _KDBUS_ATTACH_BITS_SET_NR (__builtin_popcountll(_KDBUS_ATTACH_ALL))
 
