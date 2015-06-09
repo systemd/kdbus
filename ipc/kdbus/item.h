@@ -21,8 +21,8 @@
 #include "util.h"
 
 /* generic access and iterators over a stream of items */
-#define KDBUS_ITEM_NEXT(_i) (typeof(_i))(((u8 *)_i) + KDBUS_ALIGN8((_i)->size))
-#define KDBUS_ITEMS_SIZE(_h, _is) ((_h)->size - offsetof(typeof(*_h), _is))
+#define KDBUS_ITEM_NEXT(_i) (typeof(_i))((u8 *)(_i) + KDBUS_ALIGN8((_i)->size))
+#define KDBUS_ITEMS_SIZE(_h, _is) ((_h)->size - offsetof(typeof(*(_h)), _is))
 #define KDBUS_ITEM_HEADER_SIZE offsetof(struct kdbus_item, data)
 #define KDBUS_ITEM_SIZE(_s) KDBUS_ALIGN8(KDBUS_ITEM_HEADER_SIZE + (_s))
 #define KDBUS_ITEM_PAYLOAD_SIZE(_i) ((_i)->size - KDBUS_ITEM_HEADER_SIZE)
@@ -40,7 +40,7 @@
 	 (u8 *)(_i) >= (u8 *)(_is))
 
 #define KDBUS_ITEMS_END(_i, _is, _s)					\
-	((u8 *)_i == ((u8 *)(_is) + KDBUS_ALIGN8(_s)))
+	((u8 *)(_i) == ((u8 *)(_is) + KDBUS_ALIGN8(_s)))
 
 /**
  * struct kdbus_item_header - Describes the fix part of an item
