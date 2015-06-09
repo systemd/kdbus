@@ -10,10 +10,10 @@
 #define KDBUS_ITEM_NEXT(item) \
 	(typeof(item))((uint8_t *)(item) + KDBUS_ALIGN8((item)->size))
 #define KDBUS_FOREACH(iter, first, _size)				\
-	for (iter = (first);						\
+	for ((iter) = (first);						\
 	     ((uint8_t *)(iter) < (uint8_t *)(first) + (_size)) &&	\
 	       ((uint8_t *)(iter) >= (uint8_t *)(first));		\
-	     iter = (void *)(((uint8_t *)iter) + KDBUS_ALIGN8((iter)->size)))
+	     (iter) = (void *)((uint8_t *)(iter) + KDBUS_ALIGN8((iter)->size)))
 
 static inline int kdbus_cmd_bus_make(int control_fd, struct kdbus_cmd *cmd)
 {
