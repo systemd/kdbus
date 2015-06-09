@@ -168,9 +168,8 @@ static int __kdbus_clone_userns_test(const char *bus,
 		ASSERT_EXIT(ret == 0);
 		ASSERT_EXIT(msg->dst_id == userns_conn->id);
 
-		/* Different namespaces no CAPS */
 		item = kdbus_get_item(msg, KDBUS_ITEM_CAPS);
-		ASSERT_EXIT(item == NULL);
+		ASSERT_EXIT(item);
 
 		/* uid/gid not mapped, so we have unpriv cached creds */
 		ret = kdbus_match_kdbus_creds(msg, &unmapped_creds);
@@ -196,9 +195,8 @@ static int __kdbus_clone_userns_test(const char *bus,
 		ASSERT_EXIT(ret == 0);
 		ASSERT_EXIT(msg->dst_id == KDBUS_DST_ID_BROADCAST);
 
-		/* Different namespaces no CAPS */
 		item = kdbus_get_item(msg, KDBUS_ITEM_CAPS);
-		ASSERT_EXIT(item == NULL);
+		ASSERT_EXIT(item);
 
 		/* uid/gid not mapped, so we have unpriv cached creds */
 		ret = kdbus_match_kdbus_creds(msg, &unmapped_creds);
@@ -358,9 +356,8 @@ static int kdbus_clone_userns_test(const char *bus,
 
 	userns_conn_id = msg->src_id;
 
-	/* We do not share the userns, os no KDBUS_ITEM_CAPS */
 	item = kdbus_get_item(msg, KDBUS_ITEM_CAPS);
-	ASSERT_RETURN(item == NULL);
+	ASSERT_RETURN(item);
 
 	/*
 	 * Compare received items, creds must be translated into
