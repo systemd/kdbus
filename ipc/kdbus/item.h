@@ -28,10 +28,10 @@
 #define KDBUS_ITEM_PAYLOAD_SIZE(_i) ((_i)->size - KDBUS_ITEM_HEADER_SIZE)
 
 #define KDBUS_ITEMS_FOREACH(_i, _is, _s)				\
-	for (_i = _is;							\
+	for ((_i) = (_is);						\
 	     ((u8 *)(_i) < (u8 *)(_is) + (_s)) &&			\
 	       ((u8 *)(_i) >= (u8 *)(_is));				\
-	     _i = KDBUS_ITEM_NEXT(_i))
+	     (_i) = KDBUS_ITEM_NEXT(_i))
 
 #define KDBUS_ITEM_VALID(_i, _is, _s)					\
 	((_i)->size >= KDBUS_ITEM_HEADER_SIZE &&			\
