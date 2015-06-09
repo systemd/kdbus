@@ -7,6 +7,7 @@
  * Free Software Foundation; either version 2.1 of the License, or (at
  * your option) any later version.
  */
+
 #pragma once
 
 #define BIT(X) (1 << (X))
@@ -30,23 +31,21 @@
 #define KDBUS_ITEM_FOREACH(item, head, first)				\
 	for (item = (head)->first;					\
 	     ((uint8_t *)(item) < (uint8_t *)(head) + (head)->size) &&	\
-	       ((uint8_t *)(item) >= (uint8_t *)(head));	\
+	       ((uint8_t *)(item) >= (uint8_t *)(head));		\
 	     item = KDBUS_ITEM_NEXT(item))
 #define KDBUS_FOREACH(iter, first, _size)				\
 	for (iter = (first);						\
 	     ((uint8_t *)(iter) < (uint8_t *)(first) + (_size)) &&	\
 	       ((uint8_t *)(iter) >= (uint8_t *)(first));		\
-	     iter = (void*)(((uint8_t *)iter) + KDBUS_ALIGN8((iter)->size)))
+	     iter = (void *)(((uint8_t *)iter) + KDBUS_ALIGN8((iter)->size)))
 
-
-#define _KDBUS_ATTACH_BITS_SET_NR  (__builtin_popcountll(_KDBUS_ATTACH_ALL))
+#define _KDBUS_ATTACH_BITS_SET_NR (__builtin_popcountll(_KDBUS_ATTACH_ALL))
 
 /* Sum of KDBUS_ITEM_* that reflects _KDBUS_ATTACH_ALL */
-#define KDBUS_ATTACH_ITEMS_TYPE_SUM \
-	((((_KDBUS_ATTACH_BITS_SET_NR - 1) * \
-	((_KDBUS_ATTACH_BITS_SET_NR - 1) + 1)) / 2 ) + \
+#define KDBUS_ATTACH_ITEMS_TYPE_SUM					\
+	((((_KDBUS_ATTACH_BITS_SET_NR - 1) *				\
+	((_KDBUS_ATTACH_BITS_SET_NR - 1) + 1)) / 2) +			\
 	(_KDBUS_ITEM_ATTACH_BASE * _KDBUS_ATTACH_BITS_SET_NR))
-
 
 #define POOL_SIZE (16 * 1024LU * 1024LU)
 
@@ -207,14 +206,12 @@ int kdbus_add_match_id(struct kdbus_conn *conn, uint64_t cookie,
 		       uint64_t type, uint64_t id);
 int kdbus_add_match_empty(struct kdbus_conn *conn);
 
-int all_uids_gids_are_mapped();
+int all_uids_gids_are_mapped(void);
 int drop_privileges(uid_t uid, gid_t gid);
 uint64_t now(clockid_t clock);
 char *unique_name(const char *prefix);
 
-int userns_map_uid_gid(pid_t pid,
-		       const char *map_uid,
-		       const char *map_gid);
+int userns_map_uid_gid(pid_t pid, const char *map_uid, const char *map_gid);
 int test_is_capable(int cap, ...);
 int config_user_ns_is_enabled(void);
 int config_auditsyscall_is_enabled(void);

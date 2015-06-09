@@ -1355,7 +1355,7 @@ static int all_ids_are_mapped(const char *path)
 	return 0;
 }
 
-int all_uids_gids_are_mapped()
+int all_uids_gids_are_mapped(void)
 {
 	int ret;
 
