@@ -888,7 +888,8 @@ static int kdbus_meta_push_kvec(struct kvec *kvec,
 }
 
 static void kdbus_meta_export_caps(struct kdbus_meta_caps *out,
-				   struct kdbus_meta_proc *mp)
+				   struct kdbus_meta_proc *mp,
+				   struct user_namespace *user_ns)
 {
 	struct user_namespace *iter;
 	const struct cred *cred = mp->cred;
@@ -896,18 +897,18 @@ static void kdbus_meta_export_caps(struct kdbus_meta_caps *out,
 	int i;
 
 	/*
-	 * This translates the effective capabilities of 'cred' into the current
-	 * user-namespace. If the current user-namespace is a child-namespace of
+	 * This translates the effective capabilities of 'cred' into the given
+	 * user-namespace. If the given user-namespace is a child-namespace of
 	 * the user-namespace of 'cred', the mask can be copied verbatim. If
 	 * not, the mask is cleared.
 	 * There's one exception: If 'cred' is the owner of any user-namespace
-	 * in the path between the current user-namespace and the user-namespace
+	 * in the path between the given user-namespace and the user-namespace
 	 * of 'cred', then it has all effective capabilities set. This means,
 	 * the user who created a user-namespace always has all effective
 	 * capabilities in any child namespaces. Note that this is based on the
 	 * uid of the namespace creator, not the task hierarchy.
 	 */
-	for (iter = current_user_ns(); iter; iter = iter->parent) {
+	for (iter = user_ns; iter; iter = iter->parent) {
 		if (iter == cred->user_ns) {
 			parent = true;
 			break;
@@ -951,23 +952,22 @@ static void kdbus_meta_export_caps(struct kdbus_meta_caps *out,
 }
 
 /* This is equivalent to from_kuid_munged(), but maps INVALID_UID to itself */
-static uid_t kdbus_from_kuid_keep(kuid_t uid)
+static uid_t kdbus_from_kuid_keep(struct user_namespace *ns, kuid_t uid)
 {
-	return uid_valid(uid) ?
-		from_kuid_munged(current_user_ns(), uid) : ((uid_t)-1);
+	return uid_valid(uid) ? from_kuid_munged(ns, uid) : ((uid_t)-1);
 }
 
 /* This is equivalent to from_kgid_munged(), but maps INVALID_GID to itself */
-static gid_t kdbus_from_kgid_keep(kgid_t gid)
+static gid_t kdbus_from_kgid_keep(struct user_namespace *ns, kgid_t gid)
 {
-	return gid_valid(gid) ?
-		from_kgid_munged(current_user_ns(), gid) : ((gid_t)-1);
+	return gid_valid(gid) ? from_kgid_munged(ns, gid) : ((gid_t)-1);
 }
 
 /**
  * kdbus_meta_export() - export information from metadata into a slice
  * @mp:		Process metadata, or NULL
  * @mc:		Connection metadata, or NULL
+ * @conn:	Target connection to translate metadata into
  * @mask:	Mask of KDBUS_ATTACH_* flags to export
  * @slice:	The slice to export to
  * @offset:	The offset inside @slice to write to
@@ -983,18 +983,19 @@ static gid_t kdbus_from_kgid_keep(kgid_t gid)
  * kdbus_meta_export_prepare(); depending on the namespaces in question, it
  * might use up less than that.
  *
- * All information will be translated using the current namespaces.
+ * All information will be translated using the namespaces of @conn.
  *
  * Return: 0 on success, negative error number otherwise.
  */
 int kdbus_meta_export(struct kdbus_meta_proc *mp,
 		      struct kdbus_meta_conn *mc,
+		      struct kdbus_conn *conn,
 		      u64 mask,
 		      struct kdbus_pool_slice *slice,
 		      off_t offset,
 		      size_t *real_size)
 {
-	struct user_namespace *user_ns = current_user_ns();
+	struct user_namespace *user_ns = conn->user_ns;
 	struct kdbus_item_header item_hdr[13], *hdr;
 	char *exe_pathname = NULL;
 	struct kdbus_creds creds;
@@ -1016,23 +1017,23 @@ int kdbus_meta_export(struct kdbus_meta_proc *mp,
 	/* process metadata */
 
 	if (mp && (mask & KDBUS_ATTACH_CREDS)) {
-		creds.uid	= kdbus_from_kuid_keep(mp->uid);
-		creds.euid	= kdbus_from_kuid_keep(mp->euid);
-		creds.suid	= kdbus_from_kuid_keep(mp->suid);
-		creds.fsuid	= kdbus_from_kuid_keep(mp->fsuid);
-		creds.gid	= kdbus_from_kgid_keep(mp->gid);
-		creds.egid	= kdbus_from_kgid_keep(mp->egid);
-		creds.sgid	= kdbus_from_kgid_keep(mp->sgid);
-		creds.fsgid	= kdbus_from_kgid_keep(mp->fsgid);
+		creds.uid	= kdbus_from_kuid_keep(user_ns, mp->uid);
+		creds.euid	= kdbus_from_kuid_keep(user_ns, mp->euid);
+		creds.suid	= kdbus_from_kuid_keep(user_ns, mp->suid);
+		creds.fsuid	= kdbus_from_kuid_keep(user_ns, mp->fsuid);
+		creds.gid	= kdbus_from_kgid_keep(user_ns, mp->gid);
+		creds.egid	= kdbus_from_kgid_keep(user_ns, mp->egid);
+		creds.sgid	= kdbus_from_kgid_keep(user_ns, mp->sgid);
+		creds.fsgid	= kdbus_from_kgid_keep(user_ns, mp->fsgid);
 
 		cnt += kdbus_meta_push_kvec(kvec + cnt, hdr++, KDBUS_ITEM_CREDS,
 					    &creds, sizeof(creds), &size);
 	}
 
 	if (mp && (mask & KDBUS_ATTACH_PIDS)) {
-		pids.pid = pid_vnr(mp->tgid);
-		pids.tid = pid_vnr(mp->pid);
-		pids.ppid = pid_vnr(mp->ppid);
+		pids.pid = pid_nr_ns(mp->tgid, conn->pid_ns);
+		pids.tid = pid_nr_ns(mp->pid, conn->pid_ns);
+		pids.ppid = pid_nr_ns(mp->ppid, conn->pid_ns);
 
 		cnt += kdbus_meta_push_kvec(kvec + cnt, hdr++, KDBUS_ITEM_PIDS,
 					    &pids, sizeof(pids), &size);
@@ -1078,7 +1079,8 @@ int kdbus_meta_export(struct kdbus_meta_proc *mp,
 		 */
 
 		get_fs_root(current->fs, &p);
-		if (path_equal(&p, &mp->root_path)) {
+		if (path_equal(&p, &mp->root_path) &&
+		    path_equal(&p, &conn->root_path)) {
 			exe_page = (void *)__get_free_page(GFP_TEMPORARY);
 			if (!exe_page) {
 				path_put(&p);
@@ -1116,7 +1118,7 @@ int kdbus_meta_export(struct kdbus_meta_proc *mp,
 	if (mp && (mask & KDBUS_ATTACH_CAPS)) {
 		struct kdbus_meta_caps caps = {};
 
-		kdbus_meta_export_caps(&caps, mp);
+		kdbus_meta_export_caps(&caps, mp, user_ns);
 		cnt += kdbus_meta_push_kvec(kvec + cnt, hdr++,
 					    KDBUS_ITEM_CAPS, &caps,
 					    sizeof(caps), &size);

@@ -479,6 +479,7 @@ int kdbus_queue_entry_install(struct kdbus_queue_entry *entry,
 
 		ret = kdbus_meta_export(entry->proc_meta,
 					entry->conn_meta,
+					conn_dst,
 					entry->attach_flags,
 					entry->slice,
 					entry->meta_offset,

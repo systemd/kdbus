@@ -130,6 +130,9 @@ static struct kdbus_conn *kdbus_conn_new(struct kdbus_ep *ep, bool privileged,
 	atomic_set(&conn->lost_count, 0);
 	INIT_DELAYED_WORK(&conn->work, kdbus_reply_list_scan_work);
 	conn->cred = get_current_cred();
+	conn->user_ns = get_user_ns(current_user_ns());
+	conn->pid_ns = get_pid_ns(task_active_pid_ns(current));
+	get_fs_root(current->fs, &conn->root_path);
 	init_waitqueue_head(&conn->wait);
 	kdbus_queue_init(&conn->queue);
 	conn->privileged = privileged;
@@ -271,6 +274,9 @@ static void __kdbus_conn_free(struct kref *kref)
 	kdbus_match_db_free(conn->match_db);
 	kdbus_pool_free(conn->pool);
 	kdbus_ep_unref(conn->ep);
+	path_put(&conn->root_path);
+	put_pid_ns(conn->pid_ns);
+	put_user_ns(conn->user_ns);
 	put_cred(conn->cred);
 	kfree(conn->description);
 	kfree(conn->quota);
@@ -1792,7 +1798,7 @@ int kdbus_cmd_conn_info(struct kdbus_conn *conn, void __user *argp)
 		goto exit;
 	}
 
-	ret = kdbus_meta_export(owner_conn->meta, conn_meta, attach_flags,
+	ret = kdbus_meta_export(owner_conn->meta, conn_meta, conn, attach_flags,
 				slice, sizeof(info), &meta_size);
 	if (ret < 0)
 		goto exit;

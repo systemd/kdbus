@@ -46,6 +46,7 @@ int kdbus_meta_export_prepare(struct kdbus_meta_proc *mp,
 			      u64 *mask, size_t *sz);
 int kdbus_meta_export(struct kdbus_meta_proc *mp,
 		      struct kdbus_meta_conn *mc,
+		      struct kdbus_conn *conn,
 		      u64 mask,
 		      struct kdbus_pool_slice *slice,
 		      off_t offset, size_t *real_size);
