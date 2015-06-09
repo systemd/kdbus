@@ -27,7 +27,7 @@
 #define KDBUS_ITEM_SIZE(s) KDBUS_ALIGN8((s) + KDBUS_ITEM_HEADER_SIZE)
 
 #define KDBUS_ITEM_NEXT(item) \
-	(typeof(item))(((uint8_t *)item) + KDBUS_ALIGN8((item)->size))
+	(typeof(item))((uint8_t *)(item) + KDBUS_ALIGN8((item)->size))
 #define KDBUS_ITEM_FOREACH(item, head, first)				\
 	for (item = (head)->first;					\
 	     ((uint8_t *)(item) < (uint8_t *)(head) + (head)->size) &&	\
@@ -104,7 +104,7 @@ extern int kdbus_util_verbose;
 	_setup_;							\
 	efd = eventfd(0, EFD_CLOEXEC);					\
 	ASSERT_RETURN(efd >= 0);					\
-	*clone_ret = 0;							\
+	*(clone_ret) = 0;						\
 	pid = syscall(__NR_clone, flags, NULL);				\
 	if (pid == 0) {							\
 		eventfd_t event_status = 0;				\
@@ -129,7 +129,7 @@ extern int kdbus_util_verbose;
 		ret = TEST_OK;						\
 	} else {							\
 		ret = -errno;						\
-		*clone_ret = -errno;					\
+		*(clone_ret) = -errno;					\
 	}								\
 	close(efd);							\
 	ret;								\
