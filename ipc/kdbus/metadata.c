@@ -44,26 +44,16 @@
  * @lock:		Object lock
  * @collected:		Bitmask of collected items
  * @valid:		Bitmask of collected and valid items
- * @uid:		UID of process
- * @euid:		EUID of process
- * @suid:		SUID of process
- * @fsuid:		FSUID of process
- * @gid:		GID of process
- * @egid:		EGID of process
- * @sgid:		SGID of process
- * @fsgid:		FSGID of process
+ * @cred:		Credentials
  * @pid:		PID of process
  * @tgid:		TGID of process
  * @ppid:		PPID of process
- * @auxgrps:		Auxiliary groups
- * @n_auxgrps:		Number of items in @auxgrps
  * @tid_comm:		TID comm line
  * @pid_comm:		PID comm line
  * @exe_path:		Executable path
  * @root_path:		Root-FS path
  * @cmdline:		Command-line
  * @cgroup:		Full cgroup path
- * @cred:		Credentials
  * @seclabel:		Seclabel
  * @audit_loginuid:	Audit login-UID
  * @audit_sessionid:	Audit session-ID
@@ -75,17 +65,14 @@ struct kdbus_meta_proc {
 	u64 valid;
 
 	/* KDBUS_ITEM_CREDS */
-	kuid_t uid, euid, suid, fsuid;
-	kgid_t gid, egid, sgid, fsgid;
+	/* KDBUS_ITEM_AUXGROUPS */
+	/* KDBUS_ITEM_CAPS */
+	const struct cred *cred;
 
 	/* KDBUS_ITEM_PIDS */
 	struct pid *pid;
 	struct pid *tgid;
 	struct pid *ppid;
-
-	/* KDBUS_ITEM_AUXGROUPS */
-	kgid_t *auxgrps;
-	size_t n_auxgrps;
 
 	/* KDBUS_ITEM_TID_COMM */
 	char tid_comm[TASK_COMM_LEN];
@@ -101,9 +88,6 @@ struct kdbus_meta_proc {
 
 	/* KDBUS_ITEM_CGROUP */
 	char *cgroup;
-
-	/* KDBUS_ITEM_CAPS */
-	const struct cred *cred;
 
 	/* KDBUS_ITEM_SECLABEL */
 	char *seclabel;
@@ -182,7 +166,6 @@ static void kdbus_meta_proc_free(struct kref *kref)
 	put_pid(mp->pid);
 
 	kfree(mp->seclabel);
-	kfree(mp->auxgrps);
 	kfree(mp->cmdline);
 	kfree(mp->cgroup);
 	kfree(mp);
@@ -214,21 +197,6 @@ struct kdbus_meta_proc *kdbus_meta_proc_unref(struct kdbus_meta_proc *mp)
 	return NULL;
 }
 
-static void kdbus_meta_proc_collect_creds(struct kdbus_meta_proc *mp)
-{
-	mp->uid		= current_uid();
-	mp->euid	= current_euid();
-	mp->suid	= current_suid();
-	mp->fsuid	= current_fsuid();
-
-	mp->gid		= current_gid();
-	mp->egid	= current_egid();
-	mp->sgid	= current_sgid();
-	mp->fsgid	= current_fsgid();
-
-	mp->valid |= KDBUS_ATTACH_CREDS;
-}
-
 static void kdbus_meta_proc_collect_pids(struct kdbus_meta_proc *mp)
 {
 	struct task_struct *parent;
@@ -242,30 +210,6 @@ static void kdbus_meta_proc_collect_pids(struct kdbus_meta_proc *mp)
 	rcu_read_unlock();
 
 	mp->valid |= KDBUS_ATTACH_PIDS;
-}
-
-static int kdbus_meta_proc_collect_auxgroups(struct kdbus_meta_proc *mp)
-{
-	const struct group_info *info;
-	size_t i;
-
-	/* no need to lock/ref, current creds cannot change */
-	info = current_cred()->group_info;
-
-	if (info->ngroups > 0) {
-		mp->auxgrps = kmalloc_array(info->ngroups, sizeof(kgid_t),
-					    GFP_KERNEL);
-		if (!mp->auxgrps)
-			return -ENOMEM;
-
-		for (i = 0; i < info->ngroups; i++)
-			mp->auxgrps[i] = GROUP_AT(info, i);
-	}
-
-	mp->n_auxgrps = info->ngroups;
-	mp->valid |= KDBUS_ATTACH_AUXGROUPS;
-
-	return 0;
 }
 
 static void kdbus_meta_proc_collect_tid_comm(struct kdbus_meta_proc *mp)
@@ -340,12 +284,6 @@ static int kdbus_meta_proc_collect_cgroup(struct kdbus_meta_proc *mp)
 	return 0;
 }
 
-static void kdbus_meta_proc_collect_caps(struct kdbus_meta_proc *mp)
-{
-	mp->cred = get_current_cred();
-	mp->valid |= KDBUS_ATTACH_CAPS;
-}
-
 static int kdbus_meta_proc_collect_seclabel(struct kdbus_meta_proc *mp)
 {
 #ifdef CONFIG_SECURITY
@@ -412,24 +350,23 @@ int kdbus_meta_proc_collect(struct kdbus_meta_proc *mp, u64 what)
 
 	mutex_lock(&mp->lock);
 
-	if ((what & KDBUS_ATTACH_CREDS) &&
-	    !(mp->collected & KDBUS_ATTACH_CREDS)) {
-		kdbus_meta_proc_collect_creds(mp);
-		mp->collected |= KDBUS_ATTACH_CREDS;
+	/* creds, auxgrps and caps share "struct cred" as context */
+	{
+		const u64 m_cred = KDBUS_ATTACH_CREDS |
+				   KDBUS_ATTACH_AUXGROUPS |
+				   KDBUS_ATTACH_CAPS;
+
+		if ((what & m_cred) && !(mp->collected & m_cred)) {
+			mp->cred = get_current_cred();
+			mp->valid |= m_cred;
+			mp->collected |= m_cred;
+		}
 	}
 
 	if ((what & KDBUS_ATTACH_PIDS) &&
 	    !(mp->collected & KDBUS_ATTACH_PIDS)) {
 		kdbus_meta_proc_collect_pids(mp);
 		mp->collected |= KDBUS_ATTACH_PIDS;
-	}
-
-	if ((what & KDBUS_ATTACH_AUXGROUPS) &&
-	    !(mp->collected & KDBUS_ATTACH_AUXGROUPS)) {
-		ret = kdbus_meta_proc_collect_auxgroups(mp);
-		if (ret < 0)
-			goto exit_unlock;
-		mp->collected |= KDBUS_ATTACH_AUXGROUPS;
 	}
 
 	if ((what & KDBUS_ATTACH_TID_COMM) &&
@@ -464,12 +401,6 @@ int kdbus_meta_proc_collect(struct kdbus_meta_proc *mp, u64 what)
 		if (ret < 0)
 			goto exit_unlock;
 		mp->collected |= KDBUS_ATTACH_CGROUP;
-	}
-
-	if ((what & KDBUS_ATTACH_CAPS) &&
-	    !(mp->collected & KDBUS_ATTACH_CAPS)) {
-		kdbus_meta_proc_collect_caps(mp);
-		mp->collected |= KDBUS_ATTACH_CAPS;
 	}
 
 	if ((what & KDBUS_ATTACH_SECLABEL) &&
@@ -841,7 +772,8 @@ int kdbus_meta_export_prepare(struct kdbus_meta_proc *mp,
 		size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_pids));
 
 	if (mp && (*mask & KDBUS_ATTACH_AUXGROUPS))
-		size += KDBUS_ITEM_SIZE(mp->n_auxgrps * sizeof(u64));
+		size += KDBUS_ITEM_SIZE(mp->cred->group_info->ngroups *
+					sizeof(u64));
 
 	if (mp && (*mask & KDBUS_ATTACH_TID_COMM))
 		size += KDBUS_ITEM_SIZE(strlen(mp->tid_comm) + 1);
@@ -1058,14 +990,16 @@ int kdbus_meta_export(struct kdbus_meta_proc *mp,
 		cnt += kdbus_meta_push_kvec(kvec + cnt, hdr++, KDBUS_ITEM_CREDS,
 					    &creds, sizeof(creds), &size);
 	} else if (mp && (mask & KDBUS_ATTACH_CREDS)) {
-		creds.uid	= kdbus_from_kuid_keep(user_ns, mp->uid);
-		creds.euid	= kdbus_from_kuid_keep(user_ns, mp->euid);
-		creds.suid	= kdbus_from_kuid_keep(user_ns, mp->suid);
-		creds.fsuid	= kdbus_from_kuid_keep(user_ns, mp->fsuid);
-		creds.gid	= kdbus_from_kgid_keep(user_ns, mp->gid);
-		creds.egid	= kdbus_from_kgid_keep(user_ns, mp->egid);
-		creds.sgid	= kdbus_from_kgid_keep(user_ns, mp->sgid);
-		creds.fsgid	= kdbus_from_kgid_keep(user_ns, mp->fsgid);
+		const struct cred *c = mp->cred;
+
+		creds.uid	= kdbus_from_kuid_keep(user_ns, c->uid);
+		creds.euid	= kdbus_from_kuid_keep(user_ns, c->euid);
+		creds.suid	= kdbus_from_kuid_keep(user_ns, c->suid);
+		creds.fsuid	= kdbus_from_kuid_keep(user_ns, c->fsuid);
+		creds.gid	= kdbus_from_kgid_keep(user_ns, c->gid);
+		creds.egid	= kdbus_from_kgid_keep(user_ns, c->egid);
+		creds.sgid	= kdbus_from_kgid_keep(user_ns, c->sgid);
+		creds.fsgid	= kdbus_from_kgid_keep(user_ns, c->fsgid);
 
 		cnt += kdbus_meta_push_kvec(kvec + cnt, hdr++, KDBUS_ITEM_CREDS,
 					    &creds, sizeof(creds), &size);
@@ -1088,17 +1022,20 @@ int kdbus_meta_export(struct kdbus_meta_proc *mp,
 	}
 
 	if (mp && (mask & KDBUS_ATTACH_AUXGROUPS)) {
-		size_t payload_size = mp->n_auxgrps * sizeof(u64);
-		int i;
+		const struct group_info *info = mp->cred->group_info;
+		size_t i, n, payload_size;
 
+		n = info->ngroups;
+		payload_size = n * sizeof(u64);
 		auxgrps = kmalloc(payload_size, GFP_KERNEL);
 		if (!auxgrps) {
 			ret = -ENOMEM;
 			goto exit;
 		}
 
-		for (i = 0; i < mp->n_auxgrps; i++)
-			auxgrps[i] = from_kgid_munged(user_ns, mp->auxgrps[i]);
+		for (i = 0; i < n; ++i)
+			auxgrps[i] = from_kgid_munged(user_ns,
+						      GROUP_AT(info, i));
 
 		cnt += kdbus_meta_push_kvec(kvec + cnt, hdr++,
 					    KDBUS_ITEM_AUXGROUPS,
