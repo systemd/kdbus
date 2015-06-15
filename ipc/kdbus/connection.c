@@ -172,22 +172,28 @@ static struct kdbus_conn *kdbus_conn_new(struct kdbus_ep *ep, bool privileged,
 	BUILD_BUG_ON(sizeof(bus->id128) != sizeof(hello->id128));
 	memcpy(hello->id128, bus->id128, sizeof(hello->id128));
 
-	conn->meta = kdbus_meta_proc_new();
-	if (IS_ERR(conn->meta)) {
-		ret = PTR_ERR(conn->meta);
-		conn->meta = NULL;
-		goto exit_unref;
-	}
-
 	/* privileged processes can impersonate somebody else */
 	if (creds || pids || seclabel) {
-		ret = kdbus_meta_proc_fake(conn->meta, creds, pids, seclabel);
+		conn->meta_fake = kdbus_meta_fake_new();
+		if (IS_ERR(conn->meta_fake)) {
+			ret = PTR_ERR(conn->meta_fake);
+			conn->meta_fake = NULL;
+			goto exit_unref;
+		}
+
+		ret = kdbus_meta_fake_collect(conn->meta_fake,
+					      creds, pids, seclabel);
 		if (ret < 0)
 			goto exit_unref;
-
-		conn->faked_meta = true;
 	} else {
-		ret = kdbus_meta_proc_collect(conn->meta,
+		conn->meta_proc = kdbus_meta_proc_new();
+		if (IS_ERR(conn->meta_proc)) {
+			ret = PTR_ERR(conn->meta_proc);
+			conn->meta_proc = NULL;
+			goto exit_unref;
+		}
+
+		ret = kdbus_meta_proc_collect(conn->meta_proc,
 					      KDBUS_ATTACH_CREDS |
 					      KDBUS_ATTACH_PIDS |
 					      KDBUS_ATTACH_AUXGROUPS |
@@ -270,7 +276,8 @@ static void __kdbus_conn_free(struct kref *kref)
 		kdbus_user_unref(conn->user);
 	}
 
-	kdbus_meta_proc_unref(conn->meta);
+	kdbus_meta_fake_free(conn->meta_fake);
+	kdbus_meta_proc_unref(conn->meta_proc);
 	kdbus_match_db_free(conn->match_db);
 	kdbus_pool_free(conn->pool);
 	kdbus_ep_unref(conn->ep);
@@ -1785,7 +1792,8 @@ int kdbus_cmd_conn_info(struct kdbus_conn *conn, void __user *argp)
 	if (ret < 0)
 		goto exit;
 
-	ret = kdbus_meta_export_prepare(owner_conn->meta, conn_meta,
+	ret = kdbus_meta_export_prepare(owner_conn->meta_proc,
+					owner_conn->meta_fake, conn_meta,
 					&attach_flags, &meta_size);
 	if (ret < 0)
 		goto exit;
@@ -1798,7 +1806,8 @@ int kdbus_cmd_conn_info(struct kdbus_conn *conn, void __user *argp)
 		goto exit;
 	}
 
-	ret = kdbus_meta_export(owner_conn->meta, conn_meta, conn, attach_flags,
+	ret = kdbus_meta_export(owner_conn->meta_proc, owner_conn->meta_fake,
+				conn_meta, conn, attach_flags,
 				slice, sizeof(info), &meta_size);
 	if (ret < 0)
 		goto exit;

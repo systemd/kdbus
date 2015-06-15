@@ -484,7 +484,7 @@ int kdbus_cmd_bus_creator_info(struct kdbus_conn *conn, void __user *argp)
 
 	attach_flags &= bus->attach_flags_owner;
 
-	ret = kdbus_meta_export_prepare(bus->creator_meta, NULL,
+	ret = kdbus_meta_export_prepare(bus->creator_meta, NULL, NULL,
 					&attach_flags, &meta_size);
 	if (ret < 0)
 		goto exit;
@@ -507,8 +507,8 @@ int kdbus_cmd_bus_creator_info(struct kdbus_conn *conn, void __user *argp)
 		goto exit;
 	}
 
-	ret = kdbus_meta_export(bus->creator_meta, NULL, conn, attach_flags,
-				slice, hdr_size, &meta_size);
+	ret = kdbus_meta_export(bus->creator_meta, NULL, NULL, conn,
+				attach_flags, slice, hdr_size, &meta_size);
 	if (ret < 0)
 		goto exit;
 

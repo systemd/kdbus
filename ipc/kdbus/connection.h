@@ -54,8 +54,8 @@ struct kdbus_kmsg;
  * @work:		Delayed work to handle timeouts
  *			activator for
  * @match_db:		Subscription filter to broadcast messages
- * @meta:		Active connection creator's metadata/credentials,
- *			either from the handle or from HELLO
+ * @meta_proc:		Process metadata of connection creator, or NULL
+ * @meta_fake:		Faked metadata, or NULL
  * @pool:		The user's buffer to receive messages
  * @user:		Owner of the connection
  * @cred:		The credentials of the connection at creation time
@@ -75,7 +75,6 @@ struct kdbus_kmsg;
  * @names_list:		List of well-known names
  * @names_queue_list:	Well-known names this connection waits for
  * @privileged:		Whether this connection is privileged on the bus
- * @faked_meta:		Whether the metadata was faked on HELLO
  */
 struct kdbus_conn {
 	struct kref kref;
@@ -96,7 +95,8 @@ struct kdbus_conn {
 	struct list_head reply_list;
 	struct delayed_work work;
 	struct kdbus_match_db *match_db;
-	struct kdbus_meta_proc *meta;
+	struct kdbus_meta_proc *meta_proc;
+	struct kdbus_meta_fake *meta_fake;
 	struct kdbus_pool *pool;
 	struct kdbus_user *user;
 	const struct cred *cred;
@@ -118,7 +118,6 @@ struct kdbus_conn {
 	struct list_head names_queue_list;
 
 	bool privileged:1;
-	bool faked_meta:1;
 };
 
 struct kdbus_conn *kdbus_conn_ref(struct kdbus_conn *conn);

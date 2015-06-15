@@ -626,7 +626,7 @@ int kdbus_kmsg_collect_metadata(struct kdbus_kmsg *kmsg, struct kdbus_conn *src,
 	int ret;
 
 	attach = kdbus_meta_calc_attach_flags(src, dst);
-	if (!src->faked_meta) {
+	if (!src->meta_fake) {
 		ret = kdbus_meta_proc_collect(kmsg->proc_meta, attach);
 		if (ret < 0)
 			return ret;

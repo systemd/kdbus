@@ -251,6 +251,7 @@ struct kdbus_queue_entry *kdbus_queue_entry_new(struct kdbus_conn *conn_dst,
 			atomic64_read(&conn_dst->attach_flags_recv);
 
 		ret = kdbus_meta_export_prepare(entry->proc_meta,
+						NULL,
 						entry->conn_meta,
 						&entry->attach_flags,
 						&meta_size);
@@ -478,6 +479,7 @@ int kdbus_queue_entry_install(struct kdbus_queue_entry *entry,
 		size_t meta_size;
 
 		ret = kdbus_meta_export(entry->proc_meta,
+					NULL,
 					entry->conn_meta,
 					conn_dst,
 					entry->attach_flags,

@@ -494,101 +494,116 @@ exit_unlock:
 }
 
 /**
- * kdbus_meta_proc_fake() - Fill process metadata from faked credentials
- * @mp:		Metadata
+ * kdbus_meta_fake_new() - Create fake metadata object
+ *
+ * Return: Pointer to new object on success, ERR_PTR on failure.
+ */
+struct kdbus_meta_fake *kdbus_meta_fake_new(void)
+{
+	struct kdbus_meta_fake *mf;
+
+	mf = kzalloc(sizeof(*mf), GFP_KERNEL);
+	if (!mf)
+		return ERR_PTR(-ENOMEM);
+
+	return mf;
+}
+
+/**
+ * kdbus_meta_fake_free() - Free fake metadata object
+ * @mf:		Fake metadata object
+ *
+ * Return: NULL
+ */
+struct kdbus_meta_fake *kdbus_meta_fake_free(struct kdbus_meta_fake *mf)
+{
+	if (mf) {
+		put_pid(mf->ppid);
+		put_pid(mf->tgid);
+		put_pid(mf->pid);
+		kfree(mf->seclabel);
+		kfree(mf);
+	}
+
+	return NULL;
+}
+
+/**
+ * kdbus_meta_fake_collect() - Fill fake metadata from faked credentials
+ * @mf:		Fake metadata object
  * @creds:	Creds to set, may be %NULL
  * @pids:	PIDs to set, may be %NULL
  * @seclabel:	Seclabel to set, may be %NULL
  *
  * This function takes information stored in @creds, @pids and @seclabel and
- * resolves them to kernel-representations, if possible. A call to this function
- * is considered an alternative to calling kdbus_meta_add_current(), which
- * derives the same information from the 'current' task.
+ * resolves them to kernel-representations, if possible. This call uses the
+ * current task's namespaces to resolve the given information.
  *
- * This call uses the current task's namespaces to resolve the given
- * information.
- *
- * Return: 0 on success, negative error number otherwise.
+ * Return: 0 on success, negative error code on failure.
  */
-int kdbus_meta_proc_fake(struct kdbus_meta_proc *mp,
-			 const struct kdbus_creds *creds,
-			 const struct kdbus_pids *pids,
-			 const char *seclabel)
+int kdbus_meta_fake_collect(struct kdbus_meta_fake *mf,
+			    const struct kdbus_creds *creds,
+			    const struct kdbus_pids *pids,
+			    const char *seclabel)
 {
-	int ret;
+	if (mf->valid)
+		return -EALREADY;
 
-	if (!mp)
-		return 0;
-
-	mutex_lock(&mp->lock);
-
-	if (creds && !(mp->collected & KDBUS_ATTACH_CREDS)) {
+	if (creds) {
 		struct user_namespace *ns = current_user_ns();
 
-		mp->uid		= make_kuid(ns, creds->uid);
-		mp->euid	= make_kuid(ns, creds->euid);
-		mp->suid	= make_kuid(ns, creds->suid);
-		mp->fsuid	= make_kuid(ns, creds->fsuid);
+		mf->uid		= make_kuid(ns, creds->uid);
+		mf->euid	= make_kuid(ns, creds->euid);
+		mf->suid	= make_kuid(ns, creds->suid);
+		mf->fsuid	= make_kuid(ns, creds->fsuid);
 
-		mp->gid		= make_kgid(ns, creds->gid);
-		mp->egid	= make_kgid(ns, creds->egid);
-		mp->sgid	= make_kgid(ns, creds->sgid);
-		mp->fsgid	= make_kgid(ns, creds->fsgid);
+		mf->gid		= make_kgid(ns, creds->gid);
+		mf->egid	= make_kgid(ns, creds->egid);
+		mf->sgid	= make_kgid(ns, creds->sgid);
+		mf->fsgid	= make_kgid(ns, creds->fsgid);
 
-		if ((creds->uid   != (uid_t)-1 && !uid_valid(mp->uid))   ||
-		    (creds->euid  != (uid_t)-1 && !uid_valid(mp->euid))  ||
-		    (creds->suid  != (uid_t)-1 && !uid_valid(mp->suid))  ||
-		    (creds->fsuid != (uid_t)-1 && !uid_valid(mp->fsuid)) ||
-		    (creds->gid   != (gid_t)-1 && !gid_valid(mp->gid))   ||
-		    (creds->egid  != (gid_t)-1 && !gid_valid(mp->egid))  ||
-		    (creds->sgid  != (gid_t)-1 && !gid_valid(mp->sgid))  ||
-		    (creds->fsgid != (gid_t)-1 && !gid_valid(mp->fsgid))) {
-			ret = -EINVAL;
-			goto exit_unlock;
-		}
+		if ((creds->uid   != (uid_t)-1 && !uid_valid(mf->uid))   ||
+		    (creds->euid  != (uid_t)-1 && !uid_valid(mf->euid))  ||
+		    (creds->suid  != (uid_t)-1 && !uid_valid(mf->suid))  ||
+		    (creds->fsuid != (uid_t)-1 && !uid_valid(mf->fsuid)) ||
+		    (creds->gid   != (gid_t)-1 && !gid_valid(mf->gid))   ||
+		    (creds->egid  != (gid_t)-1 && !gid_valid(mf->egid))  ||
+		    (creds->sgid  != (gid_t)-1 && !gid_valid(mf->sgid))  ||
+		    (creds->fsgid != (gid_t)-1 && !gid_valid(mf->fsgid)))
+			return -EINVAL;
 
-		mp->valid |= KDBUS_ATTACH_CREDS;
-		mp->collected |= KDBUS_ATTACH_CREDS;
+		mf->valid |= KDBUS_ATTACH_CREDS;
 	}
 
-	if (pids && !(mp->collected & KDBUS_ATTACH_PIDS)) {
-		mp->pid = get_pid(find_vpid(pids->tid));
-		mp->tgid = get_pid(find_vpid(pids->pid));
-		mp->ppid = get_pid(find_vpid(pids->ppid));
+	if (pids) {
+		mf->pid = get_pid(find_vpid(pids->tid));
+		mf->tgid = get_pid(find_vpid(pids->pid));
+		mf->ppid = get_pid(find_vpid(pids->ppid));
 
-		if ((pids->tid != 0 && !mp->pid) ||
-		    (pids->pid != 0 && !mp->tgid) ||
-		    (pids->ppid != 0 && !mp->ppid)) {
-			put_pid(mp->pid);
-			put_pid(mp->tgid);
-			put_pid(mp->ppid);
-			mp->pid = NULL;
-			mp->tgid = NULL;
-			mp->ppid = NULL;
-			ret = -EINVAL;
-			goto exit_unlock;
+		if ((pids->tid != 0 && !mf->pid) ||
+		    (pids->pid != 0 && !mf->tgid) ||
+		    (pids->ppid != 0 && !mf->ppid)) {
+			put_pid(mf->pid);
+			put_pid(mf->tgid);
+			put_pid(mf->ppid);
+			mf->pid = NULL;
+			mf->tgid = NULL;
+			mf->ppid = NULL;
+			return -EINVAL;
 		}
 
-		mp->valid |= KDBUS_ATTACH_PIDS;
-		mp->collected |= KDBUS_ATTACH_PIDS;
+		mf->valid |= KDBUS_ATTACH_PIDS;
 	}
 
-	if (seclabel && !(mp->collected & KDBUS_ATTACH_SECLABEL)) {
-		mp->seclabel = kstrdup(seclabel, GFP_KERNEL);
-		if (!mp->seclabel) {
-			ret = -ENOMEM;
-			goto exit_unlock;
-		}
+	if (seclabel) {
+		mf->seclabel = kstrdup(seclabel, GFP_KERNEL);
+		if (!mf->seclabel)
+			return -ENOMEM;
 
-		mp->valid |= KDBUS_ATTACH_SECLABEL;
-		mp->collected |= KDBUS_ATTACH_SECLABEL;
+		mf->valid |= KDBUS_ATTACH_SECLABEL;
 	}
 
-	ret = 0;
-
-exit_unlock:
-	mutex_unlock(&mp->lock);
-	return ret;
+	return 0;
 }
 
 /**
@@ -768,6 +783,7 @@ exit_unlock:
 /*
  * kdbus_meta_export_prepare() - Prepare metadata for export
  * @mp:		Process metadata, or NULL
+ * @mf:		Fake metadata, or NULL
  * @mc:		Connection metadata, or NULL
  * @mask:	Pointer to mask of KDBUS_ATTACH_* flags to export
  * @sz:		Pointer to return the size needed by the metadata
@@ -783,6 +799,7 @@ exit_unlock:
  * Return: 0 on success, negative error number otherwise.
  */
 int kdbus_meta_export_prepare(struct kdbus_meta_proc *mp,
+			      struct kdbus_meta_fake *mf,
 			      struct kdbus_meta_conn *mc,
 			      u64 *mask, size_t *sz)
 {
@@ -791,6 +808,12 @@ int kdbus_meta_export_prepare(struct kdbus_meta_proc *mp,
 	size_t size = 0;
 	u64 valid = 0;
 	int ret = 0;
+
+	if (WARN_ON(mf && mp))
+		mp = NULL;
+
+	if (mf)
+		valid |= mf->valid;
 
 	if (mp) {
 		mutex_lock(&mp->lock);
@@ -811,10 +834,10 @@ int kdbus_meta_export_prepare(struct kdbus_meta_proc *mp,
 
 	/* process metadata */
 
-	if (mp && (*mask & KDBUS_ATTACH_CREDS))
+	if ((mp || mf) && (*mask & KDBUS_ATTACH_CREDS))
 		size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_creds));
 
-	if (mp && (*mask & KDBUS_ATTACH_PIDS))
+	if ((mp || mf) && (*mask & KDBUS_ATTACH_PIDS))
 		size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_pids));
 
 	if (mp && (*mask & KDBUS_ATTACH_AUXGROUPS))
@@ -852,8 +875,9 @@ int kdbus_meta_export_prepare(struct kdbus_meta_proc *mp,
 	if (mp && (*mask & KDBUS_ATTACH_CAPS))
 		size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_meta_caps));
 
-	if (mp && (*mask & KDBUS_ATTACH_SECLABEL))
-		size += KDBUS_ITEM_SIZE(strlen(mp->seclabel) + 1);
+	if ((mp || mf) && (*mask & KDBUS_ATTACH_SECLABEL))
+		size += KDBUS_ITEM_SIZE(strlen(mp ? mp->seclabel
+						  : mf->seclabel) + 1);
 
 	if (mp && (*mask & KDBUS_ATTACH_AUDIT))
 		size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_audit));
@@ -966,6 +990,7 @@ static gid_t kdbus_from_kgid_keep(struct user_namespace *ns, kgid_t gid)
 /**
  * kdbus_meta_export() - export information from metadata into a slice
  * @mp:		Process metadata, or NULL
+ * @mf:		Fake metadata, or NULL
  * @mc:		Connection metadata, or NULL
  * @conn:	Target connection to translate metadata into
  * @mask:	Mask of KDBUS_ATTACH_* flags to export
@@ -988,6 +1013,7 @@ static gid_t kdbus_from_kgid_keep(struct user_namespace *ns, kgid_t gid)
  * Return: 0 on success, negative error number otherwise.
  */
 int kdbus_meta_export(struct kdbus_meta_proc *mp,
+		      struct kdbus_meta_fake *mf,
 		      struct kdbus_meta_conn *mc,
 		      struct kdbus_conn *conn,
 		      u64 mask,
@@ -1007,6 +1033,9 @@ int kdbus_meta_export(struct kdbus_meta_proc *mp,
 	u64 size = 0;
 	int ret = 0;
 
+	if (WARN_ON(mf && mp))
+		mp = NULL;
+
 	hdr = &item_hdr[0];
 
 	if (mask == 0) {
@@ -1016,7 +1045,19 @@ int kdbus_meta_export(struct kdbus_meta_proc *mp,
 
 	/* process metadata */
 
-	if (mp && (mask & KDBUS_ATTACH_CREDS)) {
+	if (mf && (mask & KDBUS_ATTACH_CREDS)) {
+		creds.uid	= kdbus_from_kuid_keep(user_ns, mf->uid);
+		creds.euid	= kdbus_from_kuid_keep(user_ns, mf->euid);
+		creds.suid	= kdbus_from_kuid_keep(user_ns, mf->suid);
+		creds.fsuid	= kdbus_from_kuid_keep(user_ns, mf->fsuid);
+		creds.gid	= kdbus_from_kgid_keep(user_ns, mf->gid);
+		creds.egid	= kdbus_from_kgid_keep(user_ns, mf->egid);
+		creds.sgid	= kdbus_from_kgid_keep(user_ns, mf->sgid);
+		creds.fsgid	= kdbus_from_kgid_keep(user_ns, mf->fsgid);
+
+		cnt += kdbus_meta_push_kvec(kvec + cnt, hdr++, KDBUS_ITEM_CREDS,
+					    &creds, sizeof(creds), &size);
+	} else if (mp && (mask & KDBUS_ATTACH_CREDS)) {
 		creds.uid	= kdbus_from_kuid_keep(user_ns, mp->uid);
 		creds.euid	= kdbus_from_kuid_keep(user_ns, mp->euid);
 		creds.suid	= kdbus_from_kuid_keep(user_ns, mp->suid);
@@ -1030,7 +1071,14 @@ int kdbus_meta_export(struct kdbus_meta_proc *mp,
 					    &creds, sizeof(creds), &size);
 	}
 
-	if (mp && (mask & KDBUS_ATTACH_PIDS)) {
+	if (mf && (mask & KDBUS_ATTACH_PIDS)) {
+		pids.pid = pid_nr_ns(mf->tgid, conn->pid_ns);
+		pids.tid = pid_nr_ns(mf->pid, conn->pid_ns);
+		pids.ppid = pid_nr_ns(mf->ppid, conn->pid_ns);
+
+		cnt += kdbus_meta_push_kvec(kvec + cnt, hdr++, KDBUS_ITEM_PIDS,
+					    &pids, sizeof(pids), &size);
+	} else if (mp && (mask & KDBUS_ATTACH_PIDS)) {
 		pids.pid = pid_nr_ns(mp->tgid, conn->pid_ns);
 		pids.tid = pid_nr_ns(mp->pid, conn->pid_ns);
 		pids.ppid = pid_nr_ns(mp->ppid, conn->pid_ns);
@@ -1124,7 +1172,11 @@ int kdbus_meta_export(struct kdbus_meta_proc *mp,
 					    sizeof(caps), &size);
 	}
 
-	if (mp && (mask & KDBUS_ATTACH_SECLABEL))
+	if (mf && (mask & KDBUS_ATTACH_SECLABEL))
+		cnt += kdbus_meta_push_kvec(kvec + cnt, hdr++,
+					    KDBUS_ITEM_SECLABEL, mf->seclabel,
+					    strlen(mf->seclabel) + 1, &size);
+	else if (mp && (mask & KDBUS_ATTACH_SECLABEL))
 		cnt += kdbus_meta_push_kvec(kvec + cnt, hdr++,
 					    KDBUS_ITEM_SECLABEL, mp->seclabel,
 					    strlen(mp->seclabel) + 1, &size);
