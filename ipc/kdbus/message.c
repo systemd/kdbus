@@ -214,7 +214,7 @@ static int kdbus_msg_scan_items(struct kdbus_kmsg *kmsg,
 	struct kdbus_msg_resources *res = kmsg->res;
 	const struct kdbus_msg *msg = &kmsg->msg;
 	const struct kdbus_item *item;
-	size_t n, n_vecs, n_memfds;
+	size_t n_res, n_vecs, n_memfds;
 	bool has_bloom = false;
 	bool has_name = false;
 	bool has_fds = false;
@@ -243,9 +243,9 @@ static int kdbus_msg_scan_items(struct kdbus_kmsg *kmsg,
 		}
 	}
 
-	n = n_vecs + n_memfds;
-	if (n > 0) {
-		res->data = kcalloc(n, sizeof(*res->data), GFP_KERNEL);
+	n_res = n_vecs + n_memfds;
+	if (n_res > 0) {
+		res->data = kcalloc(n_res, sizeof(*res->data), GFP_KERNEL);
 		if (!res->data)
 			return -ENOMEM;
 	}
@@ -257,14 +257,10 @@ static int kdbus_msg_scan_items(struct kdbus_kmsg *kmsg,
 	}
 
 	/* import data payloads */
-	n = 0;
 	vec_size = 0;
 	KDBUS_ITEMS_FOREACH(item, msg->items, KDBUS_ITEMS_SIZE(msg, items)) {
 		size_t payload_size = KDBUS_ITEM_PAYLOAD_SIZE(item);
 		struct iovec *iov = kmsg->iov + kmsg->iov_count;
-
-		if (++n > KDBUS_MSG_MAX_ITEMS)
-			return -E2BIG;
 
 		switch (item->type) {
 		case KDBUS_ITEM_PAYLOAD_VEC: {

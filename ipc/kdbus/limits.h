@@ -19,9 +19,6 @@
 /* maximum size of message header and items */
 #define KDBUS_MSG_MAX_SIZE		SZ_8K
 
-/* maximum number of message items */
-#define KDBUS_MSG_MAX_ITEMS		128
-
 /* maximum number of memfd items per message */
 #define KDBUS_MSG_MAX_MEMFD_ITEMS	16
 
