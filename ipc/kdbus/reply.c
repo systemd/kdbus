@@ -171,17 +171,15 @@ struct kdbus_reply *kdbus_reply_find(struct kdbus_conn *replying,
 				     struct kdbus_conn *reply_dst,
 				     u64 cookie)
 {
-	struct kdbus_reply *r, *reply = NULL;
+	struct kdbus_reply *r;
 
 	list_for_each_entry(r, &reply_dst->reply_list, entry) {
 		if (r->cookie == cookie &&
-		    (!replying || r->reply_src == replying)) {
-			reply = r;
-			break;
-		}
+		    (!replying || r->reply_src == replying))
+			return r;
 	}
 
-	return reply;
+	return NULL;
 }
 
 /**
