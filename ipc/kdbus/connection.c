@@ -559,17 +559,16 @@ int kdbus_conn_disconnect(struct kdbus_conn *conn, bool ensure_queue_empty)
 	hash_for_each(bus->conn_hash, i, c, hentry) {
 		mutex_lock(&c->lock);
 		list_for_each_entry_safe(r, r_tmp, &c->reply_list, entry) {
-			if (r->reply_src == conn) {
-				if (r->sync) {
-					kdbus_sync_reply_wakeup(r, -EPIPE);
-					kdbus_reply_unlink(r);
-					continue;
-				}
+			if (r->reply_src != conn)
+				continue;
 
+			if (r->sync)
+				kdbus_sync_reply_wakeup(r, -EPIPE);
+			else
 				/* send a 'connection dead' notification */
 				kdbus_notify_reply_dead(bus, c->id, r->cookie);
-				kdbus_reply_unlink(r);
-			}
+
+			kdbus_reply_unlink(r);
 		}
 		mutex_unlock(&c->lock);
 	}
