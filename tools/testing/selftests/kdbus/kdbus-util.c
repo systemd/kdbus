@@ -408,11 +408,9 @@ int sys_memfd_create(const char *name, __u64 size)
 {
 	int ret, fd;
 
-	ret = syscall(__NR_memfd_create, name, MFD_ALLOW_SEALING);
-	if (ret < 0)
-		return ret;
-
-	fd = ret;
+	fd = syscall(__NR_memfd_create, name, MFD_ALLOW_SEALING);
+	if (fd < 0)
+		return fd;
 
 	ret = ftruncate(fd, size);
 	if (ret < 0) {
