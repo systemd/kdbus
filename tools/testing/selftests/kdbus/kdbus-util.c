@@ -1547,7 +1547,7 @@ int test_is_capable(int cap, ...)
 	cap_t caps;
 
 	caps = cap_get_proc();
-	if (!cap) {
+	if (!caps) {
 		ret = -errno;
 		kdbus_printf("error cap_get_proc(): %d (%m)\n", ret);
 		return ret;
