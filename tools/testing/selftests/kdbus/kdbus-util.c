@@ -462,10 +462,7 @@ static int __kdbus_msg_send(const struct kdbus_conn *conn,
 	int memfd = -1;
 	int ret;
 
-	size = sizeof(*msg);
-	size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_vec));
-	size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_vec));
-	size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_vec));
+	size = sizeof(*msg) + 3 * KDBUS_ITEM_SIZE(sizeof(struct kdbus_vec));
 
 	if (dst_id == KDBUS_DST_ID_BROADCAST)
 		size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_bloom_filter)) + 64;
