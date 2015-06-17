@@ -281,16 +281,13 @@ out:
 static int kdbus_clone_userns_test(const char *bus,
 				   struct kdbus_conn *conn)
 {
-	int ret;
-	int status;
-	int efd = -1;
+	int ret, status, efd;
 	pid_t pid, ppid;
-	uint64_t unpriv_conn_id = 0;
-	uint64_t userns_conn_id = 0;
+	uint64_t unpriv_conn_id, userns_conn_id;
 	struct kdbus_msg *msg;
 	const struct kdbus_item *item;
 	struct kdbus_pids expected_pids;
-	struct kdbus_conn *monitor = NULL;
+	struct kdbus_conn *monitor;
 
 	kdbus_printf("STARTING TEST 'metadata-ns'.\n");
 
