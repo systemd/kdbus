@@ -1718,13 +1718,14 @@ int kdbus_cmd_conn_info(struct kdbus_conn *conn, void __user *argp)
 	struct kdbus_pool_slice *slice = NULL;
 	struct kdbus_name_entry *entry = NULL;
 	struct kdbus_conn *owner_conn = NULL;
+	struct kdbus_item *meta_items = NULL;
 	struct kdbus_info info = {};
 	struct kdbus_cmd_info *cmd;
 	struct kdbus_bus *bus = conn->ep->bus;
-	struct kvec kvec;
-	size_t meta_size;
+	struct kvec kvec[3];
+	size_t meta_size, cnt = 0;
 	const char *name;
-	u64 attach_flags;
+	u64 attach_flags, size = 0;
 	int ret;
 
 	struct kdbus_arg argv[] = {
@@ -1774,10 +1775,6 @@ int kdbus_cmd_conn_info(struct kdbus_conn *conn, void __user *argp)
 		goto exit;
 	}
 
-	info.id = owner_conn->id;
-	info.flags = owner_conn->flags;
-	kdbus_kvec_set(&kvec, &info, sizeof(info), &info.size);
-
 	attach_flags &= atomic64_read(&owner_conn->attach_flags_send);
 
 	conn_meta = kdbus_meta_conn_new();
@@ -1791,29 +1788,31 @@ int kdbus_cmd_conn_info(struct kdbus_conn *conn, void __user *argp)
 	if (ret < 0)
 		goto exit;
 
-	ret = kdbus_meta_export_prepare(owner_conn->meta_proc,
-					owner_conn->meta_fake, conn_meta,
-					&attach_flags, &meta_size);
+	ret = kdbus_meta_emit(owner_conn->meta_proc, owner_conn->meta_fake,
+			      conn_meta, conn, attach_flags,
+			      &meta_items, &meta_size);
 	if (ret < 0)
 		goto exit;
 
-	slice = kdbus_pool_slice_alloc(conn->pool,
-				       info.size + meta_size, false);
+	info.id = owner_conn->id;
+	info.flags = owner_conn->flags;
+
+	kdbus_kvec_set(&kvec[cnt++], &info, sizeof(info), &size);
+	if (meta_size > 0) {
+		kdbus_kvec_set(&kvec[cnt++], meta_items, meta_size, &size);
+		cnt += !!kdbus_kvec_pad(&kvec[cnt], &size);
+	}
+
+	info.size = size;
+
+	slice = kdbus_pool_slice_alloc(conn->pool, size, false);
 	if (IS_ERR(slice)) {
 		ret = PTR_ERR(slice);
 		slice = NULL;
 		goto exit;
 	}
 
-	ret = kdbus_meta_export(owner_conn->meta_proc, owner_conn->meta_fake,
-				conn_meta, conn, attach_flags,
-				slice, sizeof(info), &meta_size);
-	if (ret < 0)
-		goto exit;
-
-	info.size += meta_size;
-
-	ret = kdbus_pool_slice_copy_kvec(slice, 0, &kvec, 1, sizeof(info));
+	ret = kdbus_pool_slice_copy_kvec(slice, 0, kvec, cnt, size);
 	if (ret < 0)
 		goto exit;
 
@@ -1831,6 +1830,7 @@ int kdbus_cmd_conn_info(struct kdbus_conn *conn, void __user *argp)
 exit:
 	up_read(&bus->name_registry->rwlock);
 	kdbus_pool_slice_release(slice);
+	kfree(meta_items);
 	kdbus_meta_conn_unref(conn_meta);
 	kdbus_conn_unref(owner_conn);
 	return kdbus_args_clear(&args, ret);
