@@ -1537,17 +1537,15 @@ static bool kdbus_conn_policy_see(struct kdbus_conn *conn,
  *					  receive a given kernel notification
  * @conn:		Connection
  * @conn_creds:		Credentials of @conn to use for policy check
- * @type:		Type of notification
- * @name:		Well-known name this notification is about, or NULL
+ * @msg:		Notification message
  *
- * This checks whether @conn is allowed to see the kernel notification of type
- * @type for well-known name @name.
+ * This checks whether @conn is allowed to see the kernel notification.
  *
  * Return: true if allowed, false if not.
  */
 bool kdbus_conn_policy_see_notification(struct kdbus_conn *conn,
 					const struct cred *conn_creds,
-					u64 type, const char *name)
+					const struct kdbus_msg *msg)
 {
 	/*
 	 * Depending on the notification type, broadcasted kernel notifications
@@ -1561,11 +1559,12 @@ bool kdbus_conn_policy_see_notification(struct kdbus_conn *conn,
 	 *     broadcast to everyone, to allow tracking peers.
 	 */
 
-	switch (type) {
+	switch (msg->items[0].type) {
 	case KDBUS_ITEM_NAME_ADD:
 	case KDBUS_ITEM_NAME_REMOVE:
 	case KDBUS_ITEM_NAME_CHANGE:
-		return kdbus_conn_policy_see_name(conn, conn_creds, name);
+		return kdbus_conn_policy_see_name(conn, conn_creds,
+					msg->items[0].name_change.name);
 
 	case KDBUS_ITEM_ID_ADD:
 	case KDBUS_ITEM_ID_REMOVE:
@@ -1573,7 +1572,7 @@ bool kdbus_conn_policy_see_notification(struct kdbus_conn *conn,
 
 	default:
 		WARN(1, "Invalid type for notification broadcast: %llu\n",
-		     (unsigned long long)type);
+		     (unsigned long long)msg->items[0].type);
 		return false;
 	}
 }

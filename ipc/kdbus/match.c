@@ -225,24 +225,26 @@ static bool kdbus_match_rule_conn(const struct kdbus_match_rule *r,
 static bool kdbus_match_rule_kernel(const struct kdbus_match_rule *r,
 				    const struct kdbus_kmsg *kmsg)
 {
-	if (kmsg->notify_type != r->type)
+	struct kdbus_item *n = kmsg->notify;
+
+	if (WARN_ON(!n) || n->type != r->type)
 		return false;
 
 	switch (r->type) {
 	case KDBUS_ITEM_ID_ADD:
 		return r->new_id == KDBUS_MATCH_ID_ANY ||
-		       r->new_id == kmsg->notify_new_id;
+		       r->new_id == n->id_change.id;
 	case KDBUS_ITEM_ID_REMOVE:
 		return r->old_id == KDBUS_MATCH_ID_ANY ||
-		       r->old_id == kmsg->notify_old_id;
+		       r->old_id == n->id_change.id;
 	case KDBUS_ITEM_NAME_ADD:
 	case KDBUS_ITEM_NAME_CHANGE:
 	case KDBUS_ITEM_NAME_REMOVE:
 		return (r->old_id == KDBUS_MATCH_ID_ANY ||
-		        r->old_id == kmsg->notify_old_id) &&
+		        r->old_id == n->name_change.old_id.id) &&
 		       (r->new_id == KDBUS_MATCH_ID_ANY ||
-		        r->new_id == kmsg->notify_new_id) &&
-		       (!r->name || !strcmp(r->name, kmsg->notify_name));
+		        r->new_id == n->name_change.new_id.id) &&
+		       (!r->name || !strcmp(r->name, n->name_change.name));
 	default:
 		return false;
 	}

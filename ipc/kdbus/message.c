@@ -124,46 +124,50 @@ void kdbus_kmsg_free(struct kdbus_kmsg *kmsg)
 	kfree(kmsg);
 }
 
-/**
- * kdbus_kmsg_new() - allocate message
- * @bus:		Bus this message is allocated on
- * @extra_size:		Additional size to reserve for data
- *
- * Return: new kdbus_kmsg on success, ERR_PTR on failure.
- */
-struct kdbus_kmsg *kdbus_kmsg_new(struct kdbus_bus *bus, size_t extra_size)
+struct kdbus_kmsg *kdbus_kmsg_new_kernel(struct kdbus_bus *bus,
+					 u64 dst, u64 cookie_timeout,
+					 size_t it_size, size_t it_type)
 {
-	struct kdbus_kmsg *m;
+	struct kdbus_kmsg *kmsg;
 	size_t size;
 	int ret;
 
-	size = sizeof(struct kdbus_kmsg) + KDBUS_ITEM_SIZE(extra_size);
-	m = kzalloc(size, GFP_KERNEL);
-	if (!m)
+	size = sizeof(struct kdbus_kmsg) + KDBUS_ITEM_SIZE(it_size);
+	kmsg = kzalloc(size, GFP_KERNEL);
+	if (!kmsg)
 		return ERR_PTR(-ENOMEM);
 
-	m->seq = atomic64_inc_return(&bus->domain->last_id);
-	m->msg.size = size - KDBUS_KMSG_HEADER_SIZE;
-	m->msg.items[0].size = KDBUS_ITEM_SIZE(extra_size);
+	kmsg->seq = atomic64_inc_return(&bus->domain->last_id);
 
-	m->proc_meta = kdbus_meta_proc_new();
-	if (IS_ERR(m->proc_meta)) {
-		ret = PTR_ERR(m->proc_meta);
-		m->proc_meta = NULL;
+	kmsg->proc_meta = kdbus_meta_proc_new();
+	if (IS_ERR(kmsg->proc_meta)) {
+		ret = PTR_ERR(kmsg->proc_meta);
+		kmsg->proc_meta = NULL;
 		goto exit;
 	}
 
-	m->conn_meta = kdbus_meta_conn_new();
-	if (IS_ERR(m->conn_meta)) {
-		ret = PTR_ERR(m->conn_meta);
-		m->conn_meta = NULL;
+	kmsg->conn_meta = kdbus_meta_conn_new();
+	if (IS_ERR(kmsg->conn_meta)) {
+		ret = PTR_ERR(kmsg->conn_meta);
+		kmsg->conn_meta = NULL;
 		goto exit;
 	}
 
-	return m;
+	kmsg->msg.size = size - KDBUS_KMSG_HEADER_SIZE;
+	kmsg->msg.flags = (dst == KDBUS_DST_ID_BROADCAST) ?
+							KDBUS_MSG_SIGNAL : 0;
+	kmsg->msg.dst_id = dst;
+	kmsg->msg.src_id = KDBUS_SRC_ID_KERNEL;
+	kmsg->msg.payload_type = KDBUS_PAYLOAD_KERNEL;
+	kmsg->msg.cookie_reply = cookie_timeout;
+	kmsg->notify = kmsg->msg.items;
+	kmsg->notify->size = KDBUS_ITEM_HEADER_SIZE + it_size;
+	kmsg->notify->type = it_type;
+
+	return kmsg;
 
 exit:
-	kdbus_kmsg_free(m);
+	kdbus_kmsg_free(kmsg);
 	return ERR_PTR(ret);
 }
 

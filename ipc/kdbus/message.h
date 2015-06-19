@@ -82,10 +82,7 @@ kdbus_msg_resources_unref(struct kdbus_msg_resources *r);
 /**
  * struct kdbus_kmsg - internal message handling data
  * @seq:		Domain-global message sequence number
- * @notify_type:	Short-cut for faster lookup
- * @notify_old_id:	Short-cut for faster lookup
- * @notify_new_id:	Short-cut for faster lookup
- * @notify_name:	Short-cut for faster lookup
+ * @notify:		Short-cut to notify-item for kernel notifications
  * @bloom_filter:	Bloom filter to match message properties
  * @notify_entry:	List of kernel-generated notifications
  * @iov:		Array of iovec, describing the payload to copy
@@ -98,10 +95,7 @@ kdbus_msg_resources_unref(struct kdbus_msg_resources *r);
  */
 struct kdbus_kmsg {
 	u64 seq;
-	u64 notify_type;
-	u64 notify_old_id;
-	u64 notify_new_id;
-	const char *notify_name;
+	struct kdbus_item *notify;
 
 	const struct kdbus_bloom_filter *bloom_filter;
 	struct list_head notify_entry;
@@ -121,7 +115,9 @@ struct kdbus_kmsg {
 struct kdbus_bus;
 struct kdbus_conn;
 
-struct kdbus_kmsg *kdbus_kmsg_new(struct kdbus_bus *bus, size_t extra_size);
+struct kdbus_kmsg *kdbus_kmsg_new_kernel(struct kdbus_bus *bus,
+					 u64 dst, u64 cookie_timeout,
+					 size_t it_size, size_t it_type);
 struct kdbus_kmsg *kdbus_kmsg_new_from_cmd(struct kdbus_conn *conn,
 					   struct kdbus_cmd_send *cmd_send);
 void kdbus_kmsg_free(struct kdbus_kmsg *kmsg);

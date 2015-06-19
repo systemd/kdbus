@@ -291,8 +291,7 @@ void kdbus_bus_broadcast(struct kdbus_bus *bus,
 			 * notification
 			 */
 			if (!kdbus_conn_policy_see_notification(conn_dst, NULL,
-							kmsg->notify_type,
-							kmsg->notify_name))
+								&kmsg->msg))
 				continue;
 		}
 

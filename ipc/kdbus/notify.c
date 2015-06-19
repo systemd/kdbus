@@ -39,29 +39,13 @@ static inline void kdbus_notify_add_tail(struct kdbus_kmsg *kmsg,
 static int kdbus_notify_reply(struct kdbus_bus *bus, u64 id,
 			      u64 cookie, u64 msg_type)
 {
-	struct kdbus_kmsg *kmsg = NULL;
+	struct kdbus_kmsg *kmsg;
 
-	WARN_ON(id == 0);
-
-	kmsg = kdbus_kmsg_new(bus, 0);
+	kmsg = kdbus_kmsg_new_kernel(bus, id, cookie, 0, msg_type);
 	if (IS_ERR(kmsg))
 		return PTR_ERR(kmsg);
 
-	/*
-	 * a kernel-generated notification can only contain one
-	 * struct kdbus_item, so make a shortcut here for
-	 * faster lookup in the match db.
-	 */
-	kmsg->notify_type = msg_type;
-	kmsg->msg.flags = KDBUS_MSG_SIGNAL;
-	kmsg->msg.dst_id = id;
-	kmsg->msg.src_id = KDBUS_SRC_ID_KERNEL;
-	kmsg->msg.payload_type = KDBUS_PAYLOAD_KERNEL;
-	kmsg->msg.cookie_reply = cookie;
-	kmsg->msg.items[0].type = msg_type;
-
 	kdbus_notify_add_tail(kmsg, bus);
-
 	return 0;
 }
 
@@ -115,32 +99,24 @@ int kdbus_notify_name_change(struct kdbus_bus *bus, u64 type,
 			     u64 old_flags, u64 new_flags,
 			     const char *name)
 {
-	struct kdbus_kmsg *kmsg = NULL;
 	size_t name_len, extra_size;
+	struct kdbus_kmsg *kmsg;
 
 	name_len = strlen(name) + 1;
 	extra_size = sizeof(struct kdbus_notify_name_change) + name_len;
-	kmsg = kdbus_kmsg_new(bus, extra_size);
+
+	kmsg = kdbus_kmsg_new_kernel(bus, KDBUS_DST_ID_BROADCAST, 0,
+				     extra_size, type);
 	if (IS_ERR(kmsg))
 		return PTR_ERR(kmsg);
 
-	kmsg->msg.flags = KDBUS_MSG_SIGNAL;
-	kmsg->msg.dst_id = KDBUS_DST_ID_BROADCAST;
-	kmsg->msg.src_id = KDBUS_SRC_ID_KERNEL;
-	kmsg->msg.payload_type = KDBUS_PAYLOAD_KERNEL;
-	kmsg->notify_type = type;
-	kmsg->notify_old_id = old_id;
-	kmsg->notify_new_id = new_id;
-	kmsg->msg.items[0].type = type;
-	kmsg->msg.items[0].name_change.old_id.id = old_id;
-	kmsg->msg.items[0].name_change.old_id.flags = old_flags;
-	kmsg->msg.items[0].name_change.new_id.id = new_id;
-	kmsg->msg.items[0].name_change.new_id.flags = new_flags;
-	memcpy(kmsg->msg.items[0].name_change.name, name, name_len);
-	kmsg->notify_name = kmsg->msg.items[0].name_change.name;
+	kmsg->notify->name_change.old_id.id = old_id;
+	kmsg->notify->name_change.old_id.flags = old_flags;
+	kmsg->notify->name_change.new_id.id = new_id;
+	kmsg->notify->name_change.new_id.flags = new_flags;
+	memcpy(kmsg->notify->name_change.name, name, name_len);
 
 	kdbus_notify_add_tail(kmsg, bus);
-
 	return 0;
 }
 
@@ -156,37 +132,19 @@ int kdbus_notify_name_change(struct kdbus_bus *bus, u64 type,
  */
 int kdbus_notify_id_change(struct kdbus_bus *bus, u64 type, u64 id, u64 flags)
 {
-	struct kdbus_kmsg *kmsg = NULL;
+	struct kdbus_kmsg *kmsg;
+	size_t extra_size;
 
-	kmsg = kdbus_kmsg_new(bus, sizeof(struct kdbus_notify_id_change));
+	extra_size = sizeof(struct kdbus_notify_id_change);
+	kmsg = kdbus_kmsg_new_kernel(bus, KDBUS_DST_ID_BROADCAST, 0,
+				     extra_size, type);
 	if (IS_ERR(kmsg))
 		return PTR_ERR(kmsg);
 
-	kmsg->msg.flags = KDBUS_MSG_SIGNAL;
-	kmsg->msg.dst_id = KDBUS_DST_ID_BROADCAST;
-	kmsg->msg.src_id = KDBUS_SRC_ID_KERNEL;
-	kmsg->msg.payload_type = KDBUS_PAYLOAD_KERNEL;
-	kmsg->notify_type = type;
-
-	switch (type) {
-	case KDBUS_ITEM_ID_ADD:
-		kmsg->notify_new_id = id;
-		break;
-
-	case KDBUS_ITEM_ID_REMOVE:
-		kmsg->notify_old_id = id;
-		break;
-
-	default:
-		BUG();
-	}
-
-	kmsg->msg.items[0].type = type;
-	kmsg->msg.items[0].id_change.id = id;
-	kmsg->msg.items[0].id_change.flags = flags;
+	kmsg->notify->id_change.id = id;
+	kmsg->notify->id_change.flags = flags;
 
 	kdbus_notify_add_tail(kmsg, bus);
-
 	return 0;
 }
 

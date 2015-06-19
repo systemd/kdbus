@@ -153,7 +153,7 @@ bool kdbus_conn_policy_see_name_unlocked(struct kdbus_conn *conn,
 					 const char *name);
 bool kdbus_conn_policy_see_notification(struct kdbus_conn *conn,
 					const struct cred *curr_creds,
-					u64 type, const char *name);
+					const struct kdbus_msg *msg);
 
 /* command dispatcher */
 struct kdbus_conn *kdbus_cmd_hello(struct kdbus_ep *ep, bool privileged,
