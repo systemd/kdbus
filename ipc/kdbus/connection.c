@@ -866,13 +866,15 @@ static int kdbus_conn_entry_sync_attach(struct kdbus_conn *conn_dst,
  * @conn_dst:		The connection to queue into
  * @kmsg:		The kmsg to queue
  * @reply:		The reply tracker to attach to the queue entry
+ * @name:		Destination name this msg is sent to, or NULL
  *
  * Return: 0 on success. negative error otherwise.
  */
 int kdbus_conn_entry_insert(struct kdbus_conn *conn_src,
 			    struct kdbus_conn *conn_dst,
 			    const struct kdbus_kmsg *kmsg,
-			    struct kdbus_reply *reply)
+			    struct kdbus_reply *reply,
+			    const struct kdbus_name_entry *name)
 {
 	struct kdbus_queue_entry *entry;
 	int ret;
@@ -890,6 +892,14 @@ int kdbus_conn_entry_insert(struct kdbus_conn *conn_src,
 		if (!reply->sync)
 			schedule_delayed_work(&conn_src->work, 0);
 	}
+
+	/*
+	 * Record the sequence number of the registered name; it will
+	 * be remembered by the queue, in case messages addressed to a
+	 * name need to be moved from or to an activator.
+	 */
+	if (name)
+		entry->dst_name_id = name->name_id;
 
 	kdbus_queue_entry_enqueue(entry, reply);
 	wake_up_interruptible(&conn_dst->wait);
@@ -1023,14 +1033,14 @@ static int kdbus_conn_wait_reply(struct kdbus_conn *conn_src,
 }
 
 static int kdbus_pin_dst(struct kdbus_bus *bus,
-			 struct kdbus_kmsg *kmsg,
+			 const struct kdbus_kmsg *kmsg,
 			 struct kdbus_name_entry **out_name,
 			 struct kdbus_conn **out_dst)
 {
 	struct kdbus_msg_resources *res = kmsg->res;
+	const struct kdbus_msg *msg = &kmsg->msg;
 	struct kdbus_name_entry *name = NULL;
 	struct kdbus_conn *dst = NULL;
-	struct kdbus_msg *msg = &kmsg->msg;
 	int ret;
 
 	if (WARN_ON(!res))
@@ -1075,13 +1085,6 @@ static int kdbus_pin_dst(struct kdbus_bus *bus,
 			ret = -EADDRNOTAVAIL;
 			goto error;
 		}
-
-		/*
-		 * Record the sequence number of the registered name; it will
-		 * be passed on to the queue, in case messages addressed to a
-		 * name need to be moved from or to an activator.
-		 */
-		kmsg->dst_name_id = name->name_id;
 	}
 
 	*out_name = name;
@@ -1142,7 +1145,7 @@ static int kdbus_conn_reply(struct kdbus_conn *src, struct kdbus_kmsg *kmsg)
 	if (wake)
 		ret = kdbus_conn_entry_sync_attach(dst, kmsg, wake);
 	else
-		ret = kdbus_conn_entry_insert(src, dst, kmsg, NULL);
+		ret = kdbus_conn_entry_insert(src, dst, kmsg, NULL, name);
 
 exit:
 	up_read(&bus->name_registry->rwlock);
@@ -1217,7 +1220,7 @@ static struct kdbus_reply *kdbus_conn_call(struct kdbus_conn *src,
 
 	kdbus_bus_eavesdrop(bus, src, kmsg);
 
-	ret = kdbus_conn_entry_insert(src, dst, kmsg, wait);
+	ret = kdbus_conn_entry_insert(src, dst, kmsg, wait, name);
 	if (ret < 0)
 		goto exit;
 
@@ -1287,7 +1290,7 @@ static int kdbus_conn_unicast(struct kdbus_conn *src, struct kdbus_kmsg *kmsg)
 	if (!is_signal)
 		kdbus_bus_eavesdrop(bus, src, kmsg);
 
-	ret = kdbus_conn_entry_insert(src, dst, kmsg, wait);
+	ret = kdbus_conn_entry_insert(src, dst, kmsg, wait, name);
 	if (ret < 0 && !is_signal)
 		goto exit;
 

@@ -86,7 +86,6 @@ kdbus_msg_resources_unref(struct kdbus_msg_resources *r);
  * @notify_old_id:	Short-cut for faster lookup
  * @notify_new_id:	Short-cut for faster lookup
  * @notify_name:	Short-cut for faster lookup
- * @dst_name_id:	Short-cut to msg for faster lookup
  * @bloom_filter:	Bloom filter to match message properties
  * @notify_entry:	List of kernel-generated notifications
  * @iov:		Array of iovec, describing the payload to copy
@@ -104,7 +103,6 @@ struct kdbus_kmsg {
 	u64 notify_new_id;
 	const char *notify_name;
 
-	u64 dst_name_id;
 	const struct kdbus_bloom_filter *bloom_filter;
 	struct list_head notify_entry;
 

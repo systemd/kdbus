@@ -135,7 +135,8 @@ void kdbus_conn_lost_message(struct kdbus_conn *c);
 int kdbus_conn_entry_insert(struct kdbus_conn *conn_src,
 			    struct kdbus_conn *conn_dst,
 			    const struct kdbus_kmsg *kmsg,
-			    struct kdbus_reply *reply);
+			    struct kdbus_reply *reply,
+			    const struct kdbus_name_entry *name);
 void kdbus_conn_move_messages(struct kdbus_conn *conn_dst,
 			      struct kdbus_conn *conn_src,
 			      u64 name_id);

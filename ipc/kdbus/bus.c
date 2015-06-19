@@ -303,7 +303,8 @@ void kdbus_bus_broadcast(struct kdbus_bus *bus,
 				continue;
 		}
 
-		ret = kdbus_conn_entry_insert(conn_src, conn_dst, kmsg, NULL);
+		ret = kdbus_conn_entry_insert(conn_src, conn_dst, kmsg, NULL,
+					      NULL);
 		if (ret < 0)
 			kdbus_conn_lost_message(conn_dst);
 	}
@@ -346,7 +347,8 @@ void kdbus_bus_eavesdrop(struct kdbus_bus *bus,
 			}
 		}
 
-		ret = kdbus_conn_entry_insert(conn_src, conn_dst, kmsg, NULL);
+		ret = kdbus_conn_entry_insert(conn_src, conn_dst, kmsg, NULL,
+					      NULL);
 		if (ret < 0)
 			kdbus_conn_lost_message(conn_dst);
 	}
