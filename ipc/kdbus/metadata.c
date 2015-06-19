@@ -610,14 +610,16 @@ static int kdbus_meta_conn_collect_names(struct kdbus_meta_conn *mc,
 	lockdep_assert_held(&conn->ep->bus->name_registry->rwlock);
 
 	size = 0;
+	/* open-code length calculation to avoid final padding */
 	list_for_each_entry(e, &conn->names_list, conn_entry)
-		size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_name) +
-					strlen(e->name) + 1);
+		size = KDBUS_ALIGN8(size) + KDBUS_ITEM_HEADER_SIZE +
+			sizeof(struct kdbus_name) + strlen(e->name) + 1;
 
 	if (!size)
 		return 0;
 
-	item = kmalloc(size, GFP_KERNEL);
+	/* make sure we include zeroed padding for convenience helpers */
+	item = kmalloc(KDBUS_ALIGN8(size), GFP_KERNEL);
 	if (!item)
 		return -ENOMEM;
 
@@ -634,7 +636,8 @@ static int kdbus_meta_conn_collect_names(struct kdbus_meta_conn *mc,
 	}
 
 	/* sanity check: the buffer should be completely written now */
-	WARN_ON((u8 *)item != (u8 *)mc->owned_names_items + size);
+	WARN_ON((u8 *)item !=
+			(u8 *)mc->owned_names_items + KDBUS_ALIGN8(size));
 
 	mc->valid |= KDBUS_ATTACH_NAMES;
 	return 0;
@@ -817,7 +820,7 @@ int kdbus_meta_export_prepare(struct kdbus_meta_proc *mp,
 	/* connection metadata */
 
 	if (mc && (*mask & KDBUS_ATTACH_NAMES))
-		size += mc->owned_names_size;
+		size += KDBUS_ALIGN8(mc->owned_names_size);
 
 	if (mc && (*mask & KDBUS_ATTACH_CONN_DESCRIPTION))
 		size += KDBUS_ITEM_SIZE(strlen(mc->conn_description) + 1);
@@ -1132,7 +1135,7 @@ int kdbus_meta_export(struct kdbus_meta_proc *mp,
 
 	if (mc && (mask & KDBUS_ATTACH_NAMES))
 		kdbus_kvec_set(&kvec[cnt++], mc->owned_names_items,
-			       mc->owned_names_size, &size);
+			       KDBUS_ALIGN8(mc->owned_names_size), &size);
 
 	if (mc && (mask & KDBUS_ATTACH_CONN_DESCRIPTION))
 		cnt += kdbus_meta_push_kvec(kvec + cnt, hdr++,
