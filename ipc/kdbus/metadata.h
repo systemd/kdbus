@@ -18,7 +18,6 @@
 #include <linux/kernel.h>
 
 struct kdbus_conn;
-struct kdbus_kmsg;
 struct kdbus_pool_slice;
 
 struct kdbus_meta_proc;
@@ -70,9 +69,8 @@ struct kdbus_meta_conn *kdbus_meta_conn_new(void);
 struct kdbus_meta_conn *kdbus_meta_conn_ref(struct kdbus_meta_conn *mc);
 struct kdbus_meta_conn *kdbus_meta_conn_unref(struct kdbus_meta_conn *mc);
 int kdbus_meta_conn_collect(struct kdbus_meta_conn *mc,
-			    struct kdbus_kmsg *kmsg,
 			    struct kdbus_conn *conn,
-			    u64 what);
+			    u64 msg_seqnum, u64 what);
 
 int kdbus_meta_export_prepare(struct kdbus_meta_proc *mp,
 			      struct kdbus_meta_fake *mf,

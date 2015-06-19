@@ -209,7 +209,7 @@ void kdbus_notify_flush(struct kdbus_bus *bus)
 	spin_unlock(&bus->notify_lock);
 
 	list_for_each_entry_safe(kmsg, tmp, &notify_list, notify_entry) {
-		kdbus_meta_conn_collect(kmsg->conn_meta, kmsg, NULL,
+		kdbus_meta_conn_collect(kmsg->conn_meta, NULL, kmsg->seq,
 					KDBUS_ATTACH_TIMESTAMP);
 
 		if (kmsg->msg.dst_id != KDBUS_DST_ID_BROADCAST) {

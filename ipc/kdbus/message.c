@@ -632,5 +632,5 @@ int kdbus_kmsg_collect_metadata(struct kdbus_kmsg *kmsg, struct kdbus_conn *src,
 			return ret;
 	}
 
-	return kdbus_meta_conn_collect(kmsg->conn_meta, kmsg, src, attach);
+	return kdbus_meta_conn_collect(kmsg->conn_meta, src, kmsg->seq, attach);
 }

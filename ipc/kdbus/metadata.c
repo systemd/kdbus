@@ -589,13 +589,13 @@ struct kdbus_meta_conn *kdbus_meta_conn_unref(struct kdbus_meta_conn *mc)
 }
 
 static void kdbus_meta_conn_collect_timestamp(struct kdbus_meta_conn *mc,
-					      struct kdbus_kmsg *kmsg)
+					      u64 msg_seqnum)
 {
 	mc->ts.monotonic_ns = ktime_get_ns();
 	mc->ts.realtime_ns = ktime_get_real_ns();
 
-	if (kmsg)
-		mc->ts.seqnum = kmsg->seq;
+	if (msg_seqnum)
+		mc->ts.seqnum = msg_seqnum;
 
 	mc->valid |= KDBUS_ATTACH_TIMESTAMP;
 }
@@ -657,11 +657,12 @@ static int kdbus_meta_conn_collect_description(struct kdbus_meta_conn *mc,
 /**
  * kdbus_meta_conn_collect() - Collect connection metadata
  * @mc:		Message metadata object
- * @kmsg:	Kmsg to collect data from
  * @conn:	Connection to collect data from
+ * @msg_seqnum:	Sequence number of the message to send
  * @what:	Attach flags to collect
  *
- * This collects connection metadata from @kmsg and @conn and saves it in @mc.
+ * This collects connection metadata from @msg_seqnum and @conn and saves it
+ * in @mc.
  *
  * If KDBUS_ATTACH_NAMES is set in @what and @conn is non-NULL, the caller must
  * hold the name-registry read-lock of conn->ep->bus->registry.
@@ -669,9 +670,8 @@ static int kdbus_meta_conn_collect_description(struct kdbus_meta_conn *mc,
  * Return: 0 on success, negative error code on failure.
  */
 int kdbus_meta_conn_collect(struct kdbus_meta_conn *mc,
-			    struct kdbus_kmsg *kmsg,
 			    struct kdbus_conn *conn,
-			    u64 what)
+			    u64 msg_seqnum, u64 what)
 {
 	int ret;
 
@@ -682,9 +682,9 @@ int kdbus_meta_conn_collect(struct kdbus_meta_conn *mc,
 
 	mutex_lock(&mc->lock);
 
-	if (kmsg && (what & KDBUS_ATTACH_TIMESTAMP) &&
+	if (msg_seqnum && (what & KDBUS_ATTACH_TIMESTAMP) &&
 	    !(mc->collected & KDBUS_ATTACH_TIMESTAMP)) {
-		kdbus_meta_conn_collect_timestamp(mc, kmsg);
+		kdbus_meta_conn_collect_timestamp(mc, msg_seqnum);
 		mc->collected |= KDBUS_ATTACH_TIMESTAMP;
 	}
 

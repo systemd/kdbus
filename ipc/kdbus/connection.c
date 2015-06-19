@@ -1787,8 +1787,7 @@ int kdbus_cmd_conn_info(struct kdbus_conn *conn, void __user *argp)
 		goto exit;
 	}
 
-	ret = kdbus_meta_conn_collect(conn_meta, NULL, owner_conn,
-				      attach_flags);
+	ret = kdbus_meta_conn_collect(conn_meta, owner_conn, 0, attach_flags);
 	if (ret < 0)
 		goto exit;
 
