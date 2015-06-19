@@ -813,7 +813,12 @@ static int kdbus_conn_entry_sync_attach(struct kdbus_conn *conn_dst,
 {
 	struct kdbus_queue_entry *entry;
 	int remote_ret;
-	int ret = 0;
+	int ret;
+
+	ret = kdbus_kmsg_collect_metadata(kmsg, reply_wake->reply_src,
+					  conn_dst);
+	if (ret < 0)
+		return ret;
 
 	mutex_lock(&reply_wake->reply_dst->lock);
 
@@ -878,6 +883,12 @@ int kdbus_conn_entry_insert(struct kdbus_conn *conn_src,
 {
 	struct kdbus_queue_entry *entry;
 	int ret;
+
+	if (conn_src) {
+		ret = kdbus_kmsg_collect_metadata(kmsg, conn_src, conn_dst);
+		if (ret < 0)
+			return ret;
+	}
 
 	kdbus_conn_lock2(conn_src, conn_dst);
 
@@ -1132,12 +1143,6 @@ static int kdbus_conn_reply(struct kdbus_conn *src, struct kdbus_kmsg *kmsg)
 		goto exit;
 	}
 
-	/* attach metadata */
-
-	ret = kdbus_kmsg_collect_metadata(kmsg, src, dst);
-	if (ret < 0)
-		goto exit;
-
 	/* send message */
 
 	kdbus_bus_eavesdrop(bus, src, kmsg);
@@ -1210,12 +1215,6 @@ static struct kdbus_reply *kdbus_conn_call(struct kdbus_conn *src,
 		goto exit;
 	}
 
-	/* attach metadata */
-
-	ret = kdbus_kmsg_collect_metadata(kmsg, src, dst);
-	if (ret < 0)
-		goto exit;
-
 	/* send message */
 
 	kdbus_bus_eavesdrop(bus, src, kmsg);
@@ -1278,12 +1277,6 @@ static int kdbus_conn_unicast(struct kdbus_conn *src, struct kdbus_kmsg *kmsg)
 			goto exit;
 		}
 	}
-
-	/* attach metadata */
-
-	ret = kdbus_kmsg_collect_metadata(kmsg, src, dst);
-	if (ret < 0)
-		goto exit;
 
 	/* send message */
 

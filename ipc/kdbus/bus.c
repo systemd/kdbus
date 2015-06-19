@@ -284,13 +284,6 @@ void kdbus_bus_broadcast(struct kdbus_bus *bus,
 			 */
 			if (!kdbus_conn_policy_talk(conn_dst, NULL, conn_src))
 				continue;
-
-			ret = kdbus_kmsg_collect_metadata(kmsg, conn_src,
-							  conn_dst);
-			if (ret < 0) {
-				kdbus_conn_lost_message(conn_dst);
-				continue;
-			}
 		} else {
 			/*
 			 * Check if there is a policy db that prevents the
@@ -338,15 +331,6 @@ void kdbus_bus_eavesdrop(struct kdbus_bus *bus,
 
 	down_read(&bus->conn_rwlock);
 	list_for_each_entry(conn_dst, &bus->monitors_list, monitor_entry) {
-		if (conn_src) {
-			ret = kdbus_kmsg_collect_metadata(kmsg, conn_src,
-							  conn_dst);
-			if (ret < 0) {
-				kdbus_conn_lost_message(conn_dst);
-				continue;
-			}
-		}
-
 		ret = kdbus_conn_entry_insert(conn_src, conn_dst, kmsg, NULL,
 					      NULL);
 		if (ret < 0)
