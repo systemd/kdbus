@@ -83,6 +83,13 @@ int kdbus_meta_export(struct kdbus_meta_proc *mp,
 		      u64 mask,
 		      struct kdbus_pool_slice *slice,
 		      off_t offset, size_t *real_size);
+int kdbus_meta_emit(struct kdbus_meta_proc *mp,
+		    struct kdbus_meta_fake *mf,
+		    struct kdbus_meta_conn *mc,
+		    struct kdbus_conn *conn,
+		    u64 mask,
+		    struct kdbus_item **out_items,
+		    size_t *out_size);
 u64 kdbus_meta_calc_attach_flags(const struct kdbus_conn *sender,
 				 const struct kdbus_conn *receiver);
 

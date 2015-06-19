@@ -847,7 +847,7 @@ static int kdbus_meta_push_kvec(struct kvec *kvec,
 }
 
 static void kdbus_meta_export_caps(struct kdbus_meta_caps *out,
-				   struct kdbus_meta_proc *mp,
+				   const struct kdbus_meta_proc *mp,
 				   struct user_namespace *user_ns)
 {
 	struct user_namespace *iter;
@@ -1158,6 +1158,372 @@ exit:
 	if (exe_page)
 		free_page((unsigned long)exe_page);
 
+	return ret;
+}
+
+struct kdbus_meta_staging {
+	const struct kdbus_meta_proc *mp;
+	const struct kdbus_meta_fake *mf;
+	const struct kdbus_meta_conn *mc;
+	const struct kdbus_conn *conn;
+	u64 mask;
+
+	void *exe;
+	const char *exe_path;
+};
+
+static size_t kdbus_meta_measure(struct kdbus_meta_staging *staging)
+{
+	const struct kdbus_meta_proc *mp = staging->mp;
+	const struct kdbus_meta_fake *mf = staging->mf;
+	const struct kdbus_meta_conn *mc = staging->mc;
+	const u64 mask = staging->mask;
+	size_t size = 0;
+
+	/* process metadata */
+
+	if (mf && (mask & KDBUS_ATTACH_CREDS))
+		size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_creds));
+	else if (mp && (mask & KDBUS_ATTACH_CREDS))
+		size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_creds));
+
+	if (mf && (mask & KDBUS_ATTACH_PIDS))
+		size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_pids));
+	else if (mp && (mask & KDBUS_ATTACH_PIDS))
+		size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_pids));
+
+	if (mp && (mask & KDBUS_ATTACH_AUXGROUPS))
+		size += KDBUS_ITEM_SIZE(mp->cred->group_info->ngroups *
+					sizeof(u64));
+
+	if (mp && (mask & KDBUS_ATTACH_TID_COMM))
+		size += KDBUS_ITEM_SIZE(strlen(mp->tid_comm) + 1);
+
+	if (mp && (mask & KDBUS_ATTACH_PID_COMM))
+		size += KDBUS_ITEM_SIZE(strlen(mp->pid_comm) + 1);
+
+	if (staging->exe_path && (mask & KDBUS_ATTACH_EXE))
+		size += KDBUS_ITEM_SIZE(strlen(staging->exe_path) + 1);
+
+	if (mp && (mask & KDBUS_ATTACH_CMDLINE))
+		size += KDBUS_ITEM_SIZE(strlen(mp->cmdline) + 1);
+
+	if (mp && (mask & KDBUS_ATTACH_CGROUP))
+		size += KDBUS_ITEM_SIZE(strlen(mp->cgroup) + 1);
+
+	if (mp && (mask & KDBUS_ATTACH_CAPS))
+		size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_meta_caps));
+
+	if (mf && (mask & KDBUS_ATTACH_SECLABEL))
+		size += KDBUS_ITEM_SIZE(strlen(mf->seclabel) + 1);
+	else if (mp && (mask & KDBUS_ATTACH_SECLABEL))
+		size += KDBUS_ITEM_SIZE(strlen(mp->seclabel) + 1);
+
+	if (mp && (mask & KDBUS_ATTACH_AUDIT))
+		size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_audit));
+
+	/* connection metadata */
+
+	if (mc && (mask & KDBUS_ATTACH_NAMES))
+		size += KDBUS_ALIGN8(mc->owned_names_size);
+
+	if (mc && (mask & KDBUS_ATTACH_CONN_DESCRIPTION))
+		size += KDBUS_ITEM_SIZE(strlen(mc->conn_description) + 1);
+
+	if (mc && (mask & KDBUS_ATTACH_TIMESTAMP))
+		size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_timestamp));
+
+	return size;
+}
+
+static struct kdbus_item *kdbus_write_head(struct kdbus_item **iter,
+					   u64 type, u64 size)
+{
+	struct kdbus_item *item = *iter;
+	size_t padding;
+
+	item->type = type;
+	item->size = KDBUS_ITEM_HEADER_SIZE + size;
+
+	/* clear padding */
+	padding = KDBUS_ALIGN8(item->size) - item->size;
+	if (padding)
+		memset(item->data + size, 0, padding);
+
+	*iter = KDBUS_ITEM_NEXT(item);
+	return item;
+}
+
+static struct kdbus_item *kdbus_write_full(struct kdbus_item **iter,
+					   u64 type, u64 size, const void *data)
+{
+	struct kdbus_item *item;
+
+	item = kdbus_write_head(iter, type, size);
+	memcpy(item->data, data, size);
+	return item;
+}
+
+static size_t kdbus_meta_write(struct kdbus_meta_staging *staging, void *mem,
+			       size_t size)
+{
+	struct user_namespace *user_ns = staging->conn->user_ns;
+	struct pid_namespace *pid_ns = staging->conn->pid_ns;
+	struct kdbus_item *item = NULL, *items = mem;
+	u8 *end, *owned_names_end = NULL;
+
+	/* process metadata */
+
+	if (staging->mf && (staging->mask & KDBUS_ATTACH_CREDS)) {
+		const struct kdbus_meta_fake *mf = staging->mf;
+
+		item = kdbus_write_head(&items, KDBUS_ITEM_CREDS,
+					sizeof(struct kdbus_creds));
+		item->creds = (struct kdbus_creds){
+			.uid	= kdbus_from_kuid_keep(user_ns, mf->uid),
+			.euid	= kdbus_from_kuid_keep(user_ns, mf->euid),
+			.suid	= kdbus_from_kuid_keep(user_ns, mf->suid),
+			.fsuid	= kdbus_from_kuid_keep(user_ns, mf->fsuid),
+			.gid	= kdbus_from_kgid_keep(user_ns, mf->gid),
+			.egid	= kdbus_from_kgid_keep(user_ns, mf->egid),
+			.sgid	= kdbus_from_kgid_keep(user_ns, mf->sgid),
+			.fsgid	= kdbus_from_kgid_keep(user_ns, mf->fsgid),
+		};
+	} else if (staging->mp && (staging->mask & KDBUS_ATTACH_CREDS)) {
+		const struct cred *c = staging->mp->cred;
+
+		item = kdbus_write_head(&items, KDBUS_ITEM_CREDS,
+					sizeof(struct kdbus_creds));
+		item->creds = (struct kdbus_creds){
+			.uid	= kdbus_from_kuid_keep(user_ns, c->uid),
+			.euid	= kdbus_from_kuid_keep(user_ns, c->euid),
+			.suid	= kdbus_from_kuid_keep(user_ns, c->suid),
+			.fsuid	= kdbus_from_kuid_keep(user_ns, c->fsuid),
+			.gid	= kdbus_from_kgid_keep(user_ns, c->gid),
+			.egid	= kdbus_from_kgid_keep(user_ns, c->egid),
+			.sgid	= kdbus_from_kgid_keep(user_ns, c->sgid),
+			.fsgid	= kdbus_from_kgid_keep(user_ns, c->fsgid),
+		};
+	}
+
+	if (staging->mf && (staging->mask & KDBUS_ATTACH_PIDS)) {
+		item = kdbus_write_head(&items, KDBUS_ITEM_PIDS,
+					sizeof(struct kdbus_pids));
+		item->pids = (struct kdbus_pids){
+			.pid = pid_nr_ns(staging->mf->tgid, pid_ns),
+			.tid = pid_nr_ns(staging->mf->pid, pid_ns),
+			.ppid = pid_nr_ns(staging->mf->ppid, pid_ns),
+		};
+	} else if (staging->mp && (staging->mask & KDBUS_ATTACH_PIDS)) {
+		item = kdbus_write_head(&items, KDBUS_ITEM_PIDS,
+					sizeof(struct kdbus_pids));
+		item->pids = (struct kdbus_pids){
+			.pid = pid_nr_ns(staging->mp->tgid, pid_ns),
+			.tid = pid_nr_ns(staging->mp->pid, pid_ns),
+			.ppid = pid_nr_ns(staging->mp->ppid, pid_ns),
+		};
+	}
+
+	if (staging->mp && (staging->mask & KDBUS_ATTACH_AUXGROUPS)) {
+		const struct group_info *info = staging->mp->cred->group_info;
+		size_t i;
+
+		item = kdbus_write_head(&items, KDBUS_ITEM_AUXGROUPS,
+					info->ngroups * sizeof(u64));
+		for (i = 0; i < info->ngroups; ++i)
+			item->data64[i] = from_kgid_munged(user_ns,
+							   GROUP_AT(info, i));
+	}
+
+	if (staging->mp && (staging->mask & KDBUS_ATTACH_TID_COMM))
+		item = kdbus_write_full(&items, KDBUS_ITEM_TID_COMM,
+					strlen(staging->mp->tid_comm) + 1,
+					staging->mp->tid_comm);
+
+	if (staging->mp && (staging->mask & KDBUS_ATTACH_PID_COMM))
+		item = kdbus_write_full(&items, KDBUS_ITEM_PID_COMM,
+					strlen(staging->mp->pid_comm) + 1,
+					staging->mp->pid_comm);
+
+	if (staging->exe_path && (staging->mask & KDBUS_ATTACH_EXE))
+		item = kdbus_write_full(&items, KDBUS_ITEM_EXE,
+					strlen(staging->exe_path) + 1,
+					staging->exe_path);
+
+	if (staging->mp && (staging->mask & KDBUS_ATTACH_CMDLINE))
+		item = kdbus_write_full(&items, KDBUS_ITEM_CMDLINE,
+					strlen(staging->mp->cmdline) + 1,
+					staging->mp->cmdline);
+
+	if (staging->mp && (staging->mask & KDBUS_ATTACH_CGROUP))
+		item = kdbus_write_full(&items, KDBUS_ITEM_CGROUP,
+					strlen(staging->mp->cgroup) + 1,
+					staging->mp->cgroup);
+
+	if (staging->mp && (staging->mask & KDBUS_ATTACH_CAPS)) {
+		item = kdbus_write_head(&items, KDBUS_ITEM_CAPS,
+					sizeof(struct kdbus_meta_caps));
+		kdbus_meta_export_caps((void*)&item->caps, staging->mp,
+				       user_ns);
+	}
+
+	if (staging->mf && (staging->mask & KDBUS_ATTACH_SECLABEL))
+		item = kdbus_write_full(&items, KDBUS_ITEM_SECLABEL,
+					strlen(staging->mf->seclabel) + 1,
+					staging->mf->seclabel);
+	else if (staging->mp && (staging->mask & KDBUS_ATTACH_SECLABEL))
+		item = kdbus_write_full(&items, KDBUS_ITEM_SECLABEL,
+					strlen(staging->mp->seclabel) + 1,
+					staging->mp->seclabel);
+
+	if (staging->mp && (staging->mask & KDBUS_ATTACH_AUDIT)) {
+		item = kdbus_write_head(&items, KDBUS_ITEM_AUDIT,
+					sizeof(struct kdbus_audit));
+		item->audit = (struct kdbus_audit){
+			.loginuid = from_kuid(user_ns,
+					      staging->mp->audit_loginuid),
+			.sessionid = staging->mp->audit_sessionid,
+		};
+	}
+
+	/* connection metadata */
+
+	if (staging->mc && (staging->mask & KDBUS_ATTACH_NAMES)) {
+		memcpy(items, staging->mc->owned_names_items,
+		       KDBUS_ALIGN8(staging->mc->owned_names_size));
+		owned_names_end = (u8 *)items + staging->mc->owned_names_size;
+		items = (void *)KDBUS_ALIGN8((unsigned long)owned_names_end);
+	}
+
+	if (staging->mc && (staging->mask & KDBUS_ATTACH_CONN_DESCRIPTION))
+		item = kdbus_write_full(&items, KDBUS_ITEM_CONN_DESCRIPTION,
+				strlen(staging->mc->conn_description) + 1,
+				staging->mc->conn_description);
+
+	if (staging->mc && (staging->mask & KDBUS_ATTACH_TIMESTAMP))
+		item = kdbus_write_full(&items, KDBUS_ITEM_TIMESTAMP,
+					sizeof(staging->mc->ts),
+					&staging->mc->ts);
+
+	/*
+	 * Return real size (minus trailing padding). In case of 'owned_names'
+	 * we cannot deduce it from item->size, so treat it special.
+	 */
+
+	if (items == (void *)KDBUS_ALIGN8((unsigned long)owned_names_end))
+		end = owned_names_end;
+	else if (item)
+		end = (u8 *)item + item->size;
+	else
+		end = mem;
+
+	WARN_ON((u8 *)items - (u8 *)mem != size);
+	WARN_ON((void *)KDBUS_ALIGN8((unsigned long)end) != (void *)items);
+
+	return end - (u8 *)mem;
+}
+
+int kdbus_meta_emit(struct kdbus_meta_proc *mp,
+		    struct kdbus_meta_fake *mf,
+		    struct kdbus_meta_conn *mc,
+		    struct kdbus_conn *conn,
+		    u64 mask,
+		    struct kdbus_item **out_items,
+		    size_t *out_size)
+{
+	struct kdbus_meta_staging staging = {};
+	struct kdbus_item *items = NULL;
+	size_t size = 0;
+	int ret;
+
+	if (WARN_ON(mf && mp))
+		mp = NULL;
+
+	staging.mp = mp;
+	staging.mf = mf;
+	staging.mc = mc;
+	staging.conn = conn;
+
+	/* get mask of valid items */
+	if (mf)
+		staging.mask |= mf->valid;
+	if (mp) {
+		mutex_lock(&mp->lock);
+		staging.mask |= mp->valid;
+		mutex_unlock(&mp->lock);
+	}
+	if (mc) {
+		mutex_lock(&mc->lock);
+		staging.mask |= mc->valid;
+		mutex_unlock(&mc->lock);
+	}
+
+	staging.mask &= mask;
+
+	if (!staging.mask) { /* bail out if nothing to do */
+		ret = 0;
+		goto exit;
+	}
+
+	/* EXE is special as it needs a temporary page to assemble */
+	if (mp && (staging.mask & KDBUS_ATTACH_EXE)) {
+		struct path p;
+
+		/*
+		 * XXX: We need access to __d_path() so we can write the path
+		 * relative to conn->root_path. Once upstream, we need
+		 * EXPORT_SYMBOL(__d_path) or an equivalent of d_path() that
+		 * takes the root path directly. Until then, we drop this item
+		 * if the root-paths differ.
+		 */
+
+		get_fs_root(current->fs, &p);
+		if (path_equal(&p, &conn->root_path)) {
+			staging.exe = (void *)__get_free_page(GFP_TEMPORARY);
+			if (!staging.exe) {
+				path_put(&p);
+				ret = -ENOMEM;
+				goto exit;
+			}
+
+			staging.exe_path = d_path(&mp->exe_path, staging.exe,
+						  PAGE_SIZE);
+			if (IS_ERR(staging.exe_path)) {
+				path_put(&p);
+				ret = PTR_ERR(staging.exe_path);
+				goto exit;
+			}
+		}
+		path_put(&p);
+	}
+
+	size = kdbus_meta_measure(&staging);
+	if (!size) { /* bail out if nothing to do */
+		ret = 0;
+		goto exit;
+	}
+
+	items = kmalloc(size, GFP_KERNEL);
+	if (!items) {
+		ret = -ENOMEM;
+		goto exit;
+	}
+
+	size = kdbus_meta_write(&staging, items, size);
+	if (!size) {
+		kfree(items);
+		items = NULL;
+	}
+
+	ret = 0;
+
+exit:
+	if (staging.exe)
+		free_page((unsigned long)staging.exe);
+	if (ret >= 0) {
+		*out_items = items;
+		*out_size = size;
+	}
 	return ret;
 }
 
