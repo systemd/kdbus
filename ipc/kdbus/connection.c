@@ -779,9 +779,9 @@ void kdbus_conn_lost_message(struct kdbus_conn *c)
 
 /* Callers should take the conn_dst lock */
 static struct kdbus_queue_entry *
-kdbus_conn_entry_make(struct kdbus_conn *conn_dst,
-		      const struct kdbus_kmsg *kmsg,
-		      struct kdbus_user *user)
+kdbus_conn_entry_make(struct kdbus_conn *conn_src,
+		      struct kdbus_conn *conn_dst,
+		      const struct kdbus_kmsg *kmsg)
 {
 	/* The remote connection was disconnected */
 	if (!kdbus_conn_active(conn_dst))
@@ -799,7 +799,7 @@ kdbus_conn_entry_make(struct kdbus_conn *conn_dst,
 	    kmsg->res && kmsg->res->fds_count > 0)
 		return ERR_PTR(-ECOMM);
 
-	return kdbus_queue_entry_new(conn_dst, kmsg, user);
+	return kdbus_queue_entry_new(conn_src, conn_dst, kmsg);
 }
 
 /*
@@ -822,8 +822,8 @@ static int kdbus_conn_entry_sync_attach(struct kdbus_conn *conn_dst,
 	 * entry and attach it to the reply object
 	 */
 	if (reply_wake->waiting) {
-		entry = kdbus_conn_entry_make(conn_dst, kmsg,
-					      reply_wake->reply_src->user);
+		entry = kdbus_conn_entry_make(reply_wake->reply_src, conn_dst,
+					      kmsg);
 		if (IS_ERR(entry))
 			ret = PTR_ERR(entry);
 		else
@@ -879,8 +879,7 @@ int kdbus_conn_entry_insert(struct kdbus_conn *conn_src,
 
 	kdbus_conn_lock2(conn_src, conn_dst);
 
-	entry = kdbus_conn_entry_make(conn_dst, kmsg,
-				      conn_src ? conn_src->user : NULL);
+	entry = kdbus_conn_entry_make(conn_src, conn_dst, kmsg);
 	if (IS_ERR(entry)) {
 		ret = PTR_ERR(entry);
 		goto exit_unlock;

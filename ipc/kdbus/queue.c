@@ -171,9 +171,9 @@ static void kdbus_queue_entry_unlink(struct kdbus_queue_entry *entry)
 
 /**
  * kdbus_queue_entry_new() - allocate a queue entry
+ * @conn_src:	source connection
  * @conn_dst:	destination connection
  * @kmsg:	kmsg object the queue entry should track
- * @user:	user to account message on (or NULL for kernel messages)
  *
  * Allocates a queue entry based on a given kmsg and allocate space for
  * the message payload and the requested metadata in the connection's pool.
@@ -181,10 +181,11 @@ static void kdbus_queue_entry_unlink(struct kdbus_queue_entry *entry)
  *
  * Return: the allocated entry on success, or an ERR_PTR on failures.
  */
-struct kdbus_queue_entry *kdbus_queue_entry_new(struct kdbus_conn *conn_dst,
-						const struct kdbus_kmsg *kmsg,
-						struct kdbus_user *user)
+struct kdbus_queue_entry *kdbus_queue_entry_new(struct kdbus_conn *conn_src,
+						struct kdbus_conn *conn_dst,
+						const struct kdbus_kmsg *kmsg)
 {
+	struct kdbus_user *user = conn_src ? conn_src->user : NULL;
 	struct kdbus_msg_resources *res = kmsg->res;
 	const struct kdbus_msg *msg = &kmsg->msg;
 	struct kdbus_queue_entry *entry;
