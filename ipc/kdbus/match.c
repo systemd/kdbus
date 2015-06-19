@@ -204,87 +204,60 @@ static bool kdbus_match_bloom(const struct kdbus_bloom_filter *filter,
 	return true;
 }
 
+static bool kdbus_match_rule_conn(const struct kdbus_match_rule *r,
+				  struct kdbus_conn *c,
+				  const struct kdbus_kmsg *kmsg)
+{
+	lockdep_assert_held(&c->ep->bus->name_registry->rwlock);
+
+	switch (r->type) {
+	case KDBUS_ITEM_BLOOM_MASK:
+		return kdbus_match_bloom(kmsg->bloom_filter, &r->bloom_mask, c);
+	case KDBUS_ITEM_ID:
+		return r->src_id == c->id || r->src_id == KDBUS_MATCH_ID_ANY;
+	case KDBUS_ITEM_NAME:
+		return kdbus_conn_has_name(c, r->name);
+	default:
+		return false;
+	}
+}
+
+static bool kdbus_match_rule_kernel(const struct kdbus_match_rule *r,
+				    const struct kdbus_kmsg *kmsg)
+{
+	if (kmsg->notify_type != r->type)
+		return false;
+
+	switch (r->type) {
+	case KDBUS_ITEM_ID_ADD:
+		return r->new_id == KDBUS_MATCH_ID_ANY ||
+		       r->new_id == kmsg->notify_new_id;
+	case KDBUS_ITEM_ID_REMOVE:
+		return r->old_id == KDBUS_MATCH_ID_ANY ||
+		       r->old_id == kmsg->notify_old_id;
+	case KDBUS_ITEM_NAME_ADD:
+	case KDBUS_ITEM_NAME_CHANGE:
+	case KDBUS_ITEM_NAME_REMOVE:
+		return (r->old_id == KDBUS_MATCH_ID_ANY ||
+		        r->old_id == kmsg->notify_old_id) &&
+		       (r->new_id == KDBUS_MATCH_ID_ANY ||
+		        r->new_id == kmsg->notify_new_id) &&
+		       (!r->name || !strcmp(r->name, kmsg->notify_name));
+	default:
+		return false;
+	}
+}
+
 static bool kdbus_match_rules(const struct kdbus_match_entry *entry,
-			      struct kdbus_conn *conn_src,
-			      struct kdbus_kmsg *kmsg)
+			      struct kdbus_conn *c,
+			      const struct kdbus_kmsg *kmsg)
 {
 	struct kdbus_match_rule *r;
 
-	if (conn_src)
-		lockdep_assert_held(&conn_src->ep->bus->name_registry->rwlock);
-
-	/*
-	 * Walk all the rules and bail out immediately
-	 * if any of them is unsatisfied.
-	 */
-
-	list_for_each_entry(r, &entry->rules_list, rules_entry) {
-		if (conn_src) {
-			/* messages from userspace */
-
-			switch (r->type) {
-			case KDBUS_ITEM_BLOOM_MASK:
-				if (!kdbus_match_bloom(kmsg->bloom_filter,
-						       &r->bloom_mask,
-						       conn_src))
-					return false;
-				break;
-
-			case KDBUS_ITEM_ID:
-				if (r->src_id != conn_src->id &&
-				    r->src_id != KDBUS_MATCH_ID_ANY)
-					return false;
-
-				break;
-
-			case KDBUS_ITEM_NAME:
-				if (!kdbus_conn_has_name(conn_src, r->name))
-					return false;
-
-				break;
-
-			default:
-				return false;
-			}
-		} else {
-			/* kernel notifications */
-
-			if (kmsg->notify_type != r->type)
-				return false;
-
-			switch (r->type) {
-			case KDBUS_ITEM_ID_ADD:
-				if (r->new_id != KDBUS_MATCH_ID_ANY &&
-				    r->new_id != kmsg->notify_new_id)
-					return false;
-
-				break;
-
-			case KDBUS_ITEM_ID_REMOVE:
-				if (r->old_id != KDBUS_MATCH_ID_ANY &&
-				    r->old_id != kmsg->notify_old_id)
-					return false;
-
-				break;
-
-			case KDBUS_ITEM_NAME_ADD:
-			case KDBUS_ITEM_NAME_CHANGE:
-			case KDBUS_ITEM_NAME_REMOVE:
-				if ((r->old_id != KDBUS_MATCH_ID_ANY &&
-				     r->old_id != kmsg->notify_old_id) ||
-				    (r->new_id != KDBUS_MATCH_ID_ANY &&
-				     r->new_id != kmsg->notify_new_id) ||
-				    (r->name && kmsg->notify_name &&
-				     strcmp(r->name, kmsg->notify_name) != 0))
-					return false;
-
-				break;
-
-			default:
-				return false;
-			}
-		}
-	}
+	list_for_each_entry(r, &entry->rules_list, rules_entry)
+		if ((c && !kdbus_match_rule_conn(r, c, kmsg)) ||
+		    (!c && !kdbus_match_rule_kernel(r, kmsg)))
+			return false;
 
 	return true;
 }
