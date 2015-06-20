@@ -1929,10 +1929,13 @@ exit:
 int kdbus_cmd_send(struct kdbus_conn *conn, struct file *f, void __user *argp)
 {
 	struct kdbus_cmd_send *cmd;
+	struct kdbus_staging *staging = NULL;
 	struct kdbus_kmsg *kmsg = NULL;
+	struct kdbus_msg *msg = NULL;
 	struct file *cancel_fd = NULL;
-	int ret;
+	int ret, ret2;
 
+	/* command arguments */
 	struct kdbus_arg argv[] = {
 		{ .type = KDBUS_ITEM_NEGOTIATE },
 		{ .type = KDBUS_ITEM_CANCEL_FD },
@@ -1944,12 +1947,48 @@ int kdbus_cmd_send(struct kdbus_conn *conn, struct file *f, void __user *argp)
 		.argc = ARRAY_SIZE(argv),
 	};
 
+	/* message arguments */
+	struct kdbus_arg msg_argv[] = {
+		{ .type = KDBUS_ITEM_NEGOTIATE },
+		{ .type = KDBUS_ITEM_PAYLOAD_VEC, .multiple = true },
+		{ .type = KDBUS_ITEM_PAYLOAD_MEMFD, .multiple = true },
+		{ .type = KDBUS_ITEM_FDS },
+		{ .type = KDBUS_ITEM_BLOOM_FILTER },
+		{ .type = KDBUS_ITEM_DST_NAME },
+	};
+	struct kdbus_args msg_args = {
+		.allowed_flags = KDBUS_FLAG_NEGOTIATE |
+				 KDBUS_MSG_EXPECT_REPLY |
+				 KDBUS_MSG_NO_AUTO_START |
+				 KDBUS_MSG_SIGNAL,
+		.argv = msg_argv,
+		.argc = ARRAY_SIZE(msg_argv),
+	};
+
 	if (!kdbus_conn_is_ordinary(conn))
 		return -EOPNOTSUPP;
 
+	/* make sure to parse both, @cmd and @msg on negotiation */
+
 	ret = kdbus_args_parse(&args, argp, &cmd);
-	if (ret != 0)
-		return ret;
+	if (ret < 0)
+		goto exit;
+	else if (ret > 0 && !cmd->msg_address) /* negotiation without msg */
+		goto exit;
+
+	ret2 = kdbus_args_parse_msg(&msg_args, KDBUS_PTR(cmd->msg_address),
+				    &msg);
+	if (ret2 < 0) { /* cannot parse message */
+		ret = ret2;
+		goto exit;
+	} else if (ret2 > 0 && !ret) { /* msg-negot implies cmd-negot */
+		ret = -EINVAL;
+		goto exit;
+	} else if (ret > 0) { /* negotiation */
+		goto exit;
+	}
+
+	/* here we parsed both, @cmd and @msg, and neither wants negotiation */
 
 	cmd->reply.return_flags = 0;
 	kdbus_pool_publish_empty(conn->pool, &cmd->reply.offset,
@@ -1966,6 +2005,20 @@ int kdbus_cmd_send(struct kdbus_conn *conn, struct file *f, void __user *argp)
 			ret = -EINVAL;
 			goto exit;
 		}
+	}
+
+	/* patch-in the source of this message */
+	if (msg->src_id > 0 && msg->src_id != conn->id) {
+		ret = -EINVAL;
+		goto exit;
+	}
+	msg->src_id = conn->id;
+
+	staging = kdbus_staging_new_user(conn->ep->bus, cmd, msg);
+	if (IS_ERR(staging)) {
+		ret = PTR_ERR(staging);
+		staging = NULL;
+		goto exit;
 	}
 
 	kmsg = kdbus_kmsg_new_from_cmd(conn, cmd);
@@ -2012,6 +2065,8 @@ exit:
 	if (cancel_fd)
 		fput(cancel_fd);
 	kdbus_kmsg_free(kmsg);
+	kdbus_staging_free(staging);
+	ret = kdbus_args_clear(&msg_args, ret);
 	return kdbus_args_clear(&args, ret);
 }
 

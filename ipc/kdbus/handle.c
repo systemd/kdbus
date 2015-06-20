@@ -126,6 +126,7 @@ static int kdbus_args_negotiate(struct kdbus_args *args)
 /**
  * __kdbus_args_parse() - parse payload of kdbus command
  * @args:		object to parse data into
+ * @is_cmd:		whether this is a command or msg payload
  * @argp:		user-space location of command payload to parse
  * @type_size:		overall size of command payload to parse
  * @items_offset:	offset of items array in command payload
@@ -140,10 +141,14 @@ static int kdbus_args_negotiate(struct kdbus_args *args)
  * If this function succeeded, you must call kdbus_args_clear() to release
  * allocated resources before destroying @args.
  *
+ * This can also be used to import kdbus_msg objects. In that case, @is_cmd must
+ * be set to 'false' and the 'return_flags' field will not be touched (as it
+ * doesn't exist on kdbus_msg).
+ *
  * Return: On failure a negative error code is returned. Otherwise, 1 is
  * returned if negotiation was requested, 0 if not.
  */
-int __kdbus_args_parse(struct kdbus_args *args, void __user *argp,
+int __kdbus_args_parse(struct kdbus_args *args, bool is_cmd, void __user *argp,
 		       size_t type_size, size_t items_offset, void **out)
 {
 	u64 user_size;
@@ -173,10 +178,12 @@ int __kdbus_args_parse(struct kdbus_args *args, void __user *argp,
 		goto error;
 	}
 
-	args->cmd->return_flags = 0;
+	if (is_cmd)
+		args->cmd->return_flags = 0;
 	args->user = argp;
 	args->items = (void *)((u8 *)args->cmd + items_offset);
 	args->items_size = args->cmd->size - items_offset;
+	args->is_cmd = is_cmd;
 
 	if (args->cmd->flags & ~args->allowed_flags) {
 		ret = -EINVAL;
@@ -225,8 +232,8 @@ int kdbus_args_clear(struct kdbus_args *args, int ret)
 		return ret;
 
 	if (!IS_ERR_OR_NULL(args->cmd)) {
-		if (put_user(args->cmd->return_flags,
-			     &args->user->return_flags))
+		if (args->is_cmd && put_user(args->cmd->return_flags,
+					     &args->user->return_flags))
 			ret = -EFAULT;
 		if (args->cmd != (void*)args->cmd_buf)
 			kfree(args->cmd);
