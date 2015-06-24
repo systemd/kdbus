@@ -325,9 +325,7 @@ static void fs_super_kill(struct super_block *sb)
 	}
 
 	kill_anon_super(sb);
-
-	if (domain)
-		kdbus_domain_unref(domain);
+	kdbus_domain_unref(domain);
 }
 
 static int fs_super_set(struct super_block *sb, void *data)
