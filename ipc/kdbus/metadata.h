@@ -72,17 +72,6 @@ int kdbus_meta_conn_collect(struct kdbus_meta_conn *mc,
 			    struct kdbus_conn *conn,
 			    u64 msg_seqnum, u64 what);
 
-int kdbus_meta_export_prepare(struct kdbus_meta_proc *mp,
-			      struct kdbus_meta_fake *mf,
-			      struct kdbus_meta_conn *mc,
-			      u64 *mask, size_t *sz);
-int kdbus_meta_export(struct kdbus_meta_proc *mp,
-		      struct kdbus_meta_fake *mf,
-		      struct kdbus_meta_conn *mc,
-		      struct kdbus_conn *conn,
-		      u64 mask,
-		      struct kdbus_pool_slice *slice,
-		      off_t offset, size_t *real_size);
 int kdbus_meta_emit(struct kdbus_meta_proc *mp,
 		    struct kdbus_meta_fake *mf,
 		    struct kdbus_meta_conn *mc,
