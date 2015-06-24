@@ -232,9 +232,9 @@ struct kdbus_conn *kdbus_bus_find_conn_by_id(struct kdbus_bus *bus, u64 id)
  * kdbus_bus_broadcast() - send a message to all subscribed connections
  * @bus:	The bus the connections are connected to
  * @conn_src:	The source connection, may be %NULL for kernel notifications
- * @kmsg:	The message to send.
+ * @staging:	Staging object containing the message to send
  *
- * Send @kmsg to all connections that are currently active on the bus.
+ * Send message to all connections that are currently active on the bus.
  * Connections must still have matches installed in order to let the message
  * pass.
  *
@@ -242,7 +242,7 @@ struct kdbus_conn *kdbus_bus_find_conn_by_id(struct kdbus_bus *bus, u64 id)
  */
 void kdbus_bus_broadcast(struct kdbus_bus *bus,
 			 struct kdbus_conn *conn_src,
-			 struct kdbus_kmsg *kmsg)
+			 struct kdbus_staging *staging)
 {
 	struct kdbus_conn *conn_dst;
 	unsigned int i;
@@ -259,11 +259,11 @@ void kdbus_bus_broadcast(struct kdbus_bus *bus,
 	 * can re-construct order via sequence numbers), but we should at least
 	 * try to avoid re-ordering for monitors.
 	 */
-	kdbus_bus_eavesdrop(bus, conn_src, kmsg);
+	kdbus_bus_eavesdrop(bus, conn_src, staging);
 
 	down_read(&bus->conn_rwlock);
 	hash_for_each(bus->conn_hash, i, conn_dst, hentry) {
-		if (conn_dst->id == kmsg->msg.src_id)
+		if (conn_dst->id == staging->msg->src_id)
 			continue;
 		if (!kdbus_conn_is_ordinary(conn_dst))
 			continue;
@@ -272,8 +272,8 @@ void kdbus_bus_broadcast(struct kdbus_bus *bus,
 		 * Check if there is a match for the kmsg object in
 		 * the destination connection match db
 		 */
-		if (!kdbus_match_db_match_kmsg(conn_dst->match_db, conn_src,
-					       kmsg))
+		if (!kdbus_match_db_match_msg(conn_dst->match_db, conn_src,
+					      staging))
 			continue;
 
 		if (conn_src) {
@@ -291,12 +291,12 @@ void kdbus_bus_broadcast(struct kdbus_bus *bus,
 			 * notification
 			 */
 			if (!kdbus_conn_policy_see_notification(conn_dst, NULL,
-								&kmsg->msg))
+								staging->msg))
 				continue;
 		}
 
-		ret = kdbus_conn_entry_insert(conn_src, conn_dst, kmsg, NULL,
-					      NULL);
+		ret = kdbus_conn_entry_insert(conn_src, conn_dst, staging,
+					      NULL, NULL);
 		if (ret < 0)
 			kdbus_conn_lost_message(conn_dst);
 	}
@@ -307,16 +307,16 @@ void kdbus_bus_broadcast(struct kdbus_bus *bus,
  * kdbus_bus_eavesdrop() - send a message to all subscribed monitors
  * @bus:	The bus the monitors are connected to
  * @conn_src:	The source connection, may be %NULL for kernel notifications
- * @kmsg:	The message to send.
+ * @staging:	Staging object containing the message to send
  *
- * Send @kmsg to all monitors that are currently active on the bus. Monitors
+ * Send message to all monitors that are currently active on the bus. Monitors
  * must still have matches installed in order to let the message pass.
  *
  * The caller must hold the name-registry lock of @bus.
  */
 void kdbus_bus_eavesdrop(struct kdbus_bus *bus,
 			 struct kdbus_conn *conn_src,
-			 struct kdbus_kmsg *kmsg)
+			 struct kdbus_staging *staging)
 {
 	struct kdbus_conn *conn_dst;
 	int ret;
@@ -330,8 +330,8 @@ void kdbus_bus_eavesdrop(struct kdbus_bus *bus,
 
 	down_read(&bus->conn_rwlock);
 	list_for_each_entry(conn_dst, &bus->monitors_list, monitor_entry) {
-		ret = kdbus_conn_entry_insert(conn_src, conn_dst, kmsg, NULL,
-					      NULL);
+		ret = kdbus_conn_entry_insert(conn_src, conn_dst, staging,
+					      NULL, NULL);
 		if (ret < 0)
 			kdbus_conn_lost_message(conn_dst);
 	}

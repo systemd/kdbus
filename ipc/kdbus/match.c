@@ -206,13 +206,13 @@ static bool kdbus_match_bloom(const struct kdbus_bloom_filter *filter,
 
 static bool kdbus_match_rule_conn(const struct kdbus_match_rule *r,
 				  struct kdbus_conn *c,
-				  const struct kdbus_kmsg *kmsg)
+				  const struct kdbus_staging *s)
 {
 	lockdep_assert_held(&c->ep->bus->name_registry->rwlock);
 
 	switch (r->type) {
 	case KDBUS_ITEM_BLOOM_MASK:
-		return kdbus_match_bloom(kmsg->bloom_filter, &r->bloom_mask, c);
+		return kdbus_match_bloom(s->bloom_filter, &r->bloom_mask, c);
 	case KDBUS_ITEM_ID:
 		return r->src_id == c->id || r->src_id == KDBUS_MATCH_ID_ANY;
 	case KDBUS_ITEM_NAME:
@@ -223,9 +223,9 @@ static bool kdbus_match_rule_conn(const struct kdbus_match_rule *r,
 }
 
 static bool kdbus_match_rule_kernel(const struct kdbus_match_rule *r,
-				    const struct kdbus_kmsg *kmsg)
+				    const struct kdbus_staging *s)
 {
-	struct kdbus_item *n = kmsg->notify;
+	struct kdbus_item *n = s->notify;
 
 	if (WARN_ON(!n) || n->type != r->type)
 		return false;
@@ -252,23 +252,23 @@ static bool kdbus_match_rule_kernel(const struct kdbus_match_rule *r,
 
 static bool kdbus_match_rules(const struct kdbus_match_entry *entry,
 			      struct kdbus_conn *c,
-			      const struct kdbus_kmsg *kmsg)
+			      const struct kdbus_staging *s)
 {
 	struct kdbus_match_rule *r;
 
 	list_for_each_entry(r, &entry->rules_list, rules_entry)
-		if ((c && !kdbus_match_rule_conn(r, c, kmsg)) ||
-		    (!c && !kdbus_match_rule_kernel(r, kmsg)))
+		if ((c && !kdbus_match_rule_conn(r, c, s)) ||
+		    (!c && !kdbus_match_rule_kernel(r, s)))
 			return false;
 
 	return true;
 }
 
 /**
- * kdbus_match_db_match_kmsg() - match a kmsg object agains the database entries
+ * kdbus_match_db_match_msg() - match a msg object agains the database entries
  * @mdb:		The match database
  * @conn_src:		The connection object originating the message
- * @kmsg:		The kmsg to perform the match on
+ * @staging:		Staging object containing the message to match against
  *
  * This function will walk through all the database entries previously uploaded
  * with kdbus_match_db_add(). As soon as any of them has an all-satisfied rule
@@ -279,16 +279,16 @@ static bool kdbus_match_rules(const struct kdbus_match_entry *entry,
  *
  * Return: true if there was a matching database entry, false otherwise.
  */
-bool kdbus_match_db_match_kmsg(struct kdbus_match_db *mdb,
-			       struct kdbus_conn *conn_src,
-			       struct kdbus_kmsg *kmsg)
+bool kdbus_match_db_match_msg(struct kdbus_match_db *mdb,
+			      struct kdbus_conn *conn_src,
+			      const struct kdbus_staging *staging)
 {
 	struct kdbus_match_entry *entry;
 	bool matched = false;
 
 	down_read(&mdb->mdb_rwlock);
 	list_for_each_entry(entry, &mdb->entries_list, list_entry) {
-		matched = kdbus_match_rules(entry, conn_src, kmsg);
+		matched = kdbus_match_rules(entry, conn_src, staging);
 		if (matched)
 			break;
 	}

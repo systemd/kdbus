@@ -28,24 +28,24 @@
 #include "message.h"
 #include "notify.h"
 
-static inline void kdbus_notify_add_tail(struct kdbus_kmsg *kmsg,
+static inline void kdbus_notify_add_tail(struct kdbus_staging *staging,
 					 struct kdbus_bus *bus)
 {
 	spin_lock(&bus->notify_lock);
-	list_add_tail(&kmsg->notify_entry, &bus->notify_list);
+	list_add_tail(&staging->notify_entry, &bus->notify_list);
 	spin_unlock(&bus->notify_lock);
 }
 
 static int kdbus_notify_reply(struct kdbus_bus *bus, u64 id,
 			      u64 cookie, u64 msg_type)
 {
-	struct kdbus_kmsg *kmsg;
+	struct kdbus_staging *s;
 
-	kmsg = kdbus_kmsg_new_kernel(bus, id, cookie, 0, msg_type);
-	if (IS_ERR(kmsg))
-		return PTR_ERR(kmsg);
+	s = kdbus_staging_new_kernel(bus, id, cookie, 0, msg_type);
+	if (IS_ERR(s))
+		return PTR_ERR(s);
 
-	kdbus_notify_add_tail(kmsg, bus);
+	kdbus_notify_add_tail(s, bus);
 	return 0;
 }
 
@@ -100,23 +100,23 @@ int kdbus_notify_name_change(struct kdbus_bus *bus, u64 type,
 			     const char *name)
 {
 	size_t name_len, extra_size;
-	struct kdbus_kmsg *kmsg;
+	struct kdbus_staging *s;
 
 	name_len = strlen(name) + 1;
 	extra_size = sizeof(struct kdbus_notify_name_change) + name_len;
 
-	kmsg = kdbus_kmsg_new_kernel(bus, KDBUS_DST_ID_BROADCAST, 0,
+	s = kdbus_staging_new_kernel(bus, KDBUS_DST_ID_BROADCAST, 0,
 				     extra_size, type);
-	if (IS_ERR(kmsg))
-		return PTR_ERR(kmsg);
+	if (IS_ERR(s))
+		return PTR_ERR(s);
 
-	kmsg->notify->name_change.old_id.id = old_id;
-	kmsg->notify->name_change.old_id.flags = old_flags;
-	kmsg->notify->name_change.new_id.id = new_id;
-	kmsg->notify->name_change.new_id.flags = new_flags;
-	memcpy(kmsg->notify->name_change.name, name, name_len);
+	s->notify->name_change.old_id.id = old_id;
+	s->notify->name_change.old_id.flags = old_flags;
+	s->notify->name_change.new_id.id = new_id;
+	s->notify->name_change.new_id.flags = new_flags;
+	memcpy(s->notify->name_change.name, name, name_len);
 
-	kdbus_notify_add_tail(kmsg, bus);
+	kdbus_notify_add_tail(s, bus);
 	return 0;
 }
 
@@ -132,19 +132,19 @@ int kdbus_notify_name_change(struct kdbus_bus *bus, u64 type,
  */
 int kdbus_notify_id_change(struct kdbus_bus *bus, u64 type, u64 id, u64 flags)
 {
-	struct kdbus_kmsg *kmsg;
+	struct kdbus_staging *s;
 	size_t extra_size;
 
 	extra_size = sizeof(struct kdbus_notify_id_change);
-	kmsg = kdbus_kmsg_new_kernel(bus, KDBUS_DST_ID_BROADCAST, 0,
+	s = kdbus_staging_new_kernel(bus, KDBUS_DST_ID_BROADCAST, 0,
 				     extra_size, type);
-	if (IS_ERR(kmsg))
-		return PTR_ERR(kmsg);
+	if (IS_ERR(s))
+		return PTR_ERR(s);
 
-	kmsg->notify->id_change.id = id;
-	kmsg->notify->id_change.flags = flags;
+	s->notify->id_change.id = id;
+	s->notify->id_change.flags = flags;
 
-	kdbus_notify_add_tail(kmsg, bus);
+	kdbus_notify_add_tail(s, bus);
 	return 0;
 }
 
@@ -157,7 +157,7 @@ int kdbus_notify_id_change(struct kdbus_bus *bus, u64 type, u64 id, u64 flags)
 void kdbus_notify_flush(struct kdbus_bus *bus)
 {
 	LIST_HEAD(notify_list);
-	struct kdbus_kmsg *kmsg, *tmp;
+	struct kdbus_staging *s, *tmp;
 
 	mutex_lock(&bus->notify_flush_lock);
 	down_read(&bus->name_registry->rwlock);
@@ -166,26 +166,23 @@ void kdbus_notify_flush(struct kdbus_bus *bus)
 	list_splice_init(&bus->notify_list, &notify_list);
 	spin_unlock(&bus->notify_lock);
 
-	list_for_each_entry_safe(kmsg, tmp, &notify_list, notify_entry) {
-		kdbus_meta_conn_collect(kmsg->conn_meta, NULL, kmsg->seq,
-					KDBUS_ATTACH_TIMESTAMP);
-
-		if (kmsg->msg.dst_id != KDBUS_DST_ID_BROADCAST) {
+	list_for_each_entry_safe(s, tmp, &notify_list, notify_entry) {
+		if (s->msg->dst_id != KDBUS_DST_ID_BROADCAST) {
 			struct kdbus_conn *conn;
 
-			conn = kdbus_bus_find_conn_by_id(bus, kmsg->msg.dst_id);
+			conn = kdbus_bus_find_conn_by_id(bus, s->msg->dst_id);
 			if (conn) {
-				kdbus_bus_eavesdrop(bus, NULL, kmsg);
-				kdbus_conn_entry_insert(NULL, conn, kmsg, NULL,
+				kdbus_bus_eavesdrop(bus, NULL, s);
+				kdbus_conn_entry_insert(NULL, conn, s, NULL,
 							NULL);
 				kdbus_conn_unref(conn);
 			}
 		} else {
-			kdbus_bus_broadcast(bus, NULL, kmsg);
+			kdbus_bus_broadcast(bus, NULL, s);
 		}
 
-		list_del(&kmsg->notify_entry);
-		kdbus_kmsg_free(kmsg);
+		list_del(&s->notify_entry);
+		kdbus_staging_free(s);
 	}
 
 	up_read(&bus->name_registry->rwlock);
@@ -198,10 +195,10 @@ void kdbus_notify_flush(struct kdbus_bus *bus)
  */
 void kdbus_notify_free(struct kdbus_bus *bus)
 {
-	struct kdbus_kmsg *kmsg, *tmp;
+	struct kdbus_staging *s, *tmp;
 
-	list_for_each_entry_safe(kmsg, tmp, &bus->notify_list, notify_entry) {
-		list_del(&kmsg->notify_entry);
-		kdbus_kmsg_free(kmsg);
+	list_for_each_entry_safe(s, tmp, &bus->notify_list, notify_entry) {
+		list_del(&s->notify_entry);
+		kdbus_staging_free(s);
 	}
 }

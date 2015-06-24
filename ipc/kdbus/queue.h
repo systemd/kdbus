@@ -15,6 +15,13 @@
 #ifndef __KDBUS_QUEUE_H
 #define __KDBUS_QUEUE_H
 
+#include <linux/list.h>
+#include <linux/rbtree.h>
+
+struct kdbus_conn;
+struct kdbus_pool_slice;
+struct kdbus_reply;
+struct kdbus_staging;
 struct kdbus_user;
 
 /**
@@ -35,52 +42,37 @@ struct kdbus_queue {
  * @entry:		Entry in the connection's list
  * @prio_node:		Entry in the priority queue tree
  * @prio_entry:		Queue tree node entry in the list of one priority
- * @slice:		Slice in the receiver's pool for the message
- * @attach_flags:	Attach flags used during slice allocation
- * @meta_offset:	Offset of first metadata item in slice
- * @fds_offset:		Offset of FD item in slice
- * @memfd_offset:	Array of slice-offsets for all memfd items
  * @priority:		Message priority
  * @dst_name_id:	The sequence number of the name this message is
  *			addressed to, 0 for messages sent to an ID
- * @msg_res:		Message resources
- * @proc_meta:		Process metadata, captured at message arrival
- * @conn_meta:		Connection metadata, captured at message arrival
- * @reply:		The reply block if a reply to this message is expected
+ * @conn:		Connection this entry is queued on
+ * @gaps:		Gaps object to fill message gaps at RECV time
  * @user:		User used for accounting
+ * @slice:		Slice in the receiver's pool for the message
+ * @reply:		The reply block if a reply to this message is expected
  */
 struct kdbus_queue_entry {
 	struct list_head entry;
 	struct rb_node prio_node;
 	struct list_head prio_entry;
 
-	struct kdbus_pool_slice *slice;
-
-	u64 attach_flags;
-	size_t meta_offset;
-	size_t fds_offset;
-	size_t *memfd_offset;
-
 	s64 priority;
 	u64 dst_name_id;
 
-	struct kdbus_msg_resources *msg_res;
-	struct kdbus_meta_proc *proc_meta;
-	struct kdbus_meta_conn *conn_meta;
-	struct kdbus_reply *reply;
 	struct kdbus_conn *conn;
+	struct kdbus_gaps *gaps;
 	struct kdbus_user *user;
+	struct kdbus_pool_slice *slice;
+	struct kdbus_reply *reply;
 };
-
-struct kdbus_kmsg;
 
 void kdbus_queue_init(struct kdbus_queue *queue);
 struct kdbus_queue_entry *kdbus_queue_peek(struct kdbus_queue *queue,
 					   s64 priority, bool use_priority);
 
-struct kdbus_queue_entry *kdbus_queue_entry_new(struct kdbus_conn *conn_src,
-						struct kdbus_conn *conn_dst,
-						const struct kdbus_kmsg *kmsg);
+struct kdbus_queue_entry *kdbus_queue_entry_new(struct kdbus_conn *src,
+						struct kdbus_conn *dst,
+						struct kdbus_staging *s);
 void kdbus_queue_entry_free(struct kdbus_queue_entry *entry);
 int kdbus_queue_entry_install(struct kdbus_queue_entry *entry,
 			      u64 *return_flags, bool install_fds);

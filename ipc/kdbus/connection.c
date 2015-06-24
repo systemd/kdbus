@@ -781,7 +781,7 @@ void kdbus_conn_lost_message(struct kdbus_conn *c)
 static struct kdbus_queue_entry *
 kdbus_conn_entry_make(struct kdbus_conn *conn_src,
 		      struct kdbus_conn *conn_dst,
-		      const struct kdbus_kmsg *kmsg)
+		      struct kdbus_staging *staging)
 {
 	/* The remote connection was disconnected */
 	if (!kdbus_conn_active(conn_dst))
@@ -796,10 +796,10 @@ kdbus_conn_entry_make(struct kdbus_conn *conn_src,
 	 */
 	if (!kdbus_conn_is_monitor(conn_dst) &&
 	    !(conn_dst->flags & KDBUS_HELLO_ACCEPT_FD) &&
-	    kmsg->res && kmsg->res->fds_count > 0)
+	    staging->gaps && staging->gaps->n_fds > 0)
 		return ERR_PTR(-ECOMM);
 
-	return kdbus_queue_entry_new(conn_src, conn_dst, kmsg);
+	return kdbus_queue_entry_new(conn_src, conn_dst, staging);
 }
 
 /*
@@ -808,17 +808,11 @@ kdbus_conn_entry_make(struct kdbus_conn *conn_src,
  * The connection's queue will never get to see it.
  */
 static int kdbus_conn_entry_sync_attach(struct kdbus_conn *conn_dst,
-					const struct kdbus_kmsg *kmsg,
+					struct kdbus_staging *staging,
 					struct kdbus_reply *reply_wake)
 {
 	struct kdbus_queue_entry *entry;
-	int remote_ret;
-	int ret;
-
-	ret = kdbus_kmsg_collect_metadata(kmsg, reply_wake->reply_src,
-					  conn_dst);
-	if (ret < 0)
-		return ret;
+	int remote_ret, ret = 0;
 
 	mutex_lock(&reply_wake->reply_dst->lock);
 
@@ -828,7 +822,7 @@ static int kdbus_conn_entry_sync_attach(struct kdbus_conn *conn_dst,
 	 */
 	if (reply_wake->waiting) {
 		entry = kdbus_conn_entry_make(reply_wake->reply_src, conn_dst,
-					      kmsg);
+					      staging);
 		if (IS_ERR(entry))
 			ret = PTR_ERR(entry);
 		else
@@ -869,7 +863,7 @@ static int kdbus_conn_entry_sync_attach(struct kdbus_conn *conn_dst,
  * kdbus_conn_entry_insert() - enqueue a message into the receiver's pool
  * @conn_src:		The sending connection
  * @conn_dst:		The connection to queue into
- * @kmsg:		The kmsg to queue
+ * @staging:		Message to send
  * @reply:		The reply tracker to attach to the queue entry
  * @name:		Destination name this msg is sent to, or NULL
  *
@@ -877,22 +871,16 @@ static int kdbus_conn_entry_sync_attach(struct kdbus_conn *conn_dst,
  */
 int kdbus_conn_entry_insert(struct kdbus_conn *conn_src,
 			    struct kdbus_conn *conn_dst,
-			    const struct kdbus_kmsg *kmsg,
+			    struct kdbus_staging *staging,
 			    struct kdbus_reply *reply,
 			    const struct kdbus_name_entry *name)
 {
 	struct kdbus_queue_entry *entry;
 	int ret;
 
-	if (conn_src) {
-		ret = kdbus_kmsg_collect_metadata(kmsg, conn_src, conn_dst);
-		if (ret < 0)
-			return ret;
-	}
-
 	kdbus_conn_lock2(conn_src, conn_dst);
 
-	entry = kdbus_conn_entry_make(conn_src, conn_dst, kmsg);
+	entry = kdbus_conn_entry_make(conn_src, conn_dst, staging);
 	if (IS_ERR(entry)) {
 		ret = PTR_ERR(entry);
 		goto exit_unlock;
@@ -1044,22 +1032,18 @@ static int kdbus_conn_wait_reply(struct kdbus_conn *conn_src,
 }
 
 static int kdbus_pin_dst(struct kdbus_bus *bus,
-			 const struct kdbus_kmsg *kmsg,
+			 struct kdbus_staging *staging,
 			 struct kdbus_name_entry **out_name,
 			 struct kdbus_conn **out_dst)
 {
-	struct kdbus_msg_resources *res = kmsg->res;
-	const struct kdbus_msg *msg = &kmsg->msg;
+	const struct kdbus_msg *msg = staging->msg;
 	struct kdbus_name_entry *name = NULL;
 	struct kdbus_conn *dst = NULL;
 	int ret;
 
-	if (WARN_ON(!res))
-		return -EINVAL;
-
 	lockdep_assert_held(&bus->name_registry->rwlock);
 
-	if (!res->dst_name) {
+	if (!staging->dst_name) {
 		dst = kdbus_bus_find_conn_by_id(bus, msg->dst_id);
 		if (!dst)
 			return -ENXIO;
@@ -1070,7 +1054,7 @@ static int kdbus_pin_dst(struct kdbus_bus *bus,
 		}
 	} else {
 		name = kdbus_name_lookup_unlocked(bus->name_registry,
-						  res->dst_name);
+						  staging->dst_name);
 		if (!name)
 			return -ESRCH;
 
@@ -1107,17 +1091,19 @@ error:
 	return ret;
 }
 
-static int kdbus_conn_reply(struct kdbus_conn *src, struct kdbus_kmsg *kmsg)
+static int kdbus_conn_reply(struct kdbus_conn *src,
+			    struct kdbus_staging *staging)
 {
+	const struct kdbus_msg *msg = staging->msg;
 	struct kdbus_name_entry *name = NULL;
 	struct kdbus_reply *reply, *wake = NULL;
 	struct kdbus_conn *dst = NULL;
 	struct kdbus_bus *bus = src->ep->bus;
 	int ret;
 
-	if (WARN_ON(kmsg->msg.dst_id == KDBUS_DST_ID_BROADCAST) ||
-	    WARN_ON(kmsg->msg.flags & KDBUS_MSG_EXPECT_REPLY) ||
-	    WARN_ON(kmsg->msg.flags & KDBUS_MSG_SIGNAL))
+	if (WARN_ON(msg->dst_id == KDBUS_DST_ID_BROADCAST) ||
+	    WARN_ON(msg->flags & KDBUS_MSG_EXPECT_REPLY) ||
+	    WARN_ON(msg->flags & KDBUS_MSG_SIGNAL))
 		return -EINVAL;
 
 	/* name-registry must be locked for lookup *and* collecting data */
@@ -1125,12 +1111,12 @@ static int kdbus_conn_reply(struct kdbus_conn *src, struct kdbus_kmsg *kmsg)
 
 	/* find and pin destination */
 
-	ret = kdbus_pin_dst(bus, kmsg, &name, &dst);
+	ret = kdbus_pin_dst(bus, staging, &name, &dst);
 	if (ret < 0)
 		goto exit;
 
 	mutex_lock(&dst->lock);
-	reply = kdbus_reply_find(src, dst, kmsg->msg.cookie_reply);
+	reply = kdbus_reply_find(src, dst, msg->cookie_reply);
 	if (reply) {
 		if (reply->sync)
 			wake = kdbus_reply_ref(reply);
@@ -1145,12 +1131,12 @@ static int kdbus_conn_reply(struct kdbus_conn *src, struct kdbus_kmsg *kmsg)
 
 	/* send message */
 
-	kdbus_bus_eavesdrop(bus, src, kmsg);
+	kdbus_bus_eavesdrop(bus, src, staging);
 
 	if (wake)
-		ret = kdbus_conn_entry_sync_attach(dst, kmsg, wake);
+		ret = kdbus_conn_entry_sync_attach(dst, staging, wake);
 	else
-		ret = kdbus_conn_entry_insert(src, dst, kmsg, NULL, name);
+		ret = kdbus_conn_entry_insert(src, dst, staging, NULL, name);
 
 exit:
 	up_read(&bus->name_registry->rwlock);
@@ -1160,24 +1146,25 @@ exit:
 }
 
 static struct kdbus_reply *kdbus_conn_call(struct kdbus_conn *src,
-					   struct kdbus_kmsg *kmsg,
+					   struct kdbus_staging *staging,
 					   ktime_t exp)
 {
+	const struct kdbus_msg *msg = staging->msg;
 	struct kdbus_name_entry *name = NULL;
 	struct kdbus_reply *wait = NULL;
 	struct kdbus_conn *dst = NULL;
 	struct kdbus_bus *bus = src->ep->bus;
 	int ret;
 
-	if (WARN_ON(kmsg->msg.dst_id == KDBUS_DST_ID_BROADCAST) ||
-	    WARN_ON(kmsg->msg.flags & KDBUS_MSG_SIGNAL) ||
-	    WARN_ON(!(kmsg->msg.flags & KDBUS_MSG_EXPECT_REPLY)))
+	if (WARN_ON(msg->dst_id == KDBUS_DST_ID_BROADCAST) ||
+	    WARN_ON(msg->flags & KDBUS_MSG_SIGNAL) ||
+	    WARN_ON(!(msg->flags & KDBUS_MSG_EXPECT_REPLY)))
 		return ERR_PTR(-EINVAL);
 
 	/* resume previous wait-context, if available */
 
 	mutex_lock(&src->lock);
-	wait = kdbus_reply_find(NULL, src, kmsg->msg.cookie);
+	wait = kdbus_reply_find(NULL, src, msg->cookie);
 	if (wait) {
 		if (wait->interrupted) {
 			kdbus_reply_ref(wait);
@@ -1199,7 +1186,7 @@ static struct kdbus_reply *kdbus_conn_call(struct kdbus_conn *src,
 
 	/* find and pin destination */
 
-	ret = kdbus_pin_dst(bus, kmsg, &name, &dst);
+	ret = kdbus_pin_dst(bus, staging, &name, &dst);
 	if (ret < 0)
 		goto exit;
 
@@ -1208,7 +1195,7 @@ static struct kdbus_reply *kdbus_conn_call(struct kdbus_conn *src,
 		goto exit;
 	}
 
-	wait = kdbus_reply_new(dst, src, &kmsg->msg, name, true);
+	wait = kdbus_reply_new(dst, src, msg, name, true);
 	if (IS_ERR(wait)) {
 		ret = PTR_ERR(wait);
 		wait = NULL;
@@ -1217,9 +1204,9 @@ static struct kdbus_reply *kdbus_conn_call(struct kdbus_conn *src,
 
 	/* send message */
 
-	kdbus_bus_eavesdrop(bus, src, kmsg);
+	kdbus_bus_eavesdrop(bus, src, staging);
 
-	ret = kdbus_conn_entry_insert(src, dst, kmsg, wait, name);
+	ret = kdbus_conn_entry_insert(src, dst, staging, wait, name);
 	if (ret < 0)
 		goto exit;
 
@@ -1235,18 +1222,20 @@ exit:
 	return wait;
 }
 
-static int kdbus_conn_unicast(struct kdbus_conn *src, struct kdbus_kmsg *kmsg)
+static int kdbus_conn_unicast(struct kdbus_conn *src,
+			      struct kdbus_staging *staging)
 {
+	const struct kdbus_msg *msg = staging->msg;
 	struct kdbus_name_entry *name = NULL;
 	struct kdbus_reply *wait = NULL;
 	struct kdbus_conn *dst = NULL;
 	struct kdbus_bus *bus = src->ep->bus;
-	bool is_signal = (kmsg->msg.flags & KDBUS_MSG_SIGNAL);
+	bool is_signal = (msg->flags & KDBUS_MSG_SIGNAL);
 	int ret = 0;
 
-	if (WARN_ON(kmsg->msg.dst_id == KDBUS_DST_ID_BROADCAST) ||
-	    WARN_ON(!(kmsg->msg.flags & KDBUS_MSG_EXPECT_REPLY) &&
-		    kmsg->msg.cookie_reply != 0))
+	if (WARN_ON(msg->dst_id == KDBUS_DST_ID_BROADCAST) ||
+	    WARN_ON(!(msg->flags & KDBUS_MSG_EXPECT_REPLY) &&
+		    msg->cookie_reply != 0))
 		return -EINVAL;
 
 	/* name-registry must be locked for lookup *and* collecting data */
@@ -1254,23 +1243,23 @@ static int kdbus_conn_unicast(struct kdbus_conn *src, struct kdbus_kmsg *kmsg)
 
 	/* find and pin destination */
 
-	ret = kdbus_pin_dst(bus, kmsg, &name, &dst);
+	ret = kdbus_pin_dst(bus, staging, &name, &dst);
 	if (ret < 0)
 		goto exit;
 
 	if (is_signal) {
 		/* like broadcasts we eavesdrop even if the msg is dropped */
-		kdbus_bus_eavesdrop(bus, src, kmsg);
+		kdbus_bus_eavesdrop(bus, src, staging);
 
 		/* drop silently if peer is not interested or not privileged */
-		if (!kdbus_match_db_match_kmsg(dst->match_db, src, kmsg) ||
+		if (!kdbus_match_db_match_msg(dst->match_db, src, staging) ||
 		    !kdbus_conn_policy_talk(dst, NULL, src))
 			goto exit;
 	} else if (!kdbus_conn_policy_talk(src, current_cred(), dst)) {
 		ret = -EPERM;
 		goto exit;
-	} else if (kmsg->msg.flags & KDBUS_MSG_EXPECT_REPLY) {
-		wait = kdbus_reply_new(dst, src, &kmsg->msg, name, false);
+	} else if (msg->flags & KDBUS_MSG_EXPECT_REPLY) {
+		wait = kdbus_reply_new(dst, src, msg, name, false);
 		if (IS_ERR(wait)) {
 			ret = PTR_ERR(wait);
 			wait = NULL;
@@ -1281,9 +1270,9 @@ static int kdbus_conn_unicast(struct kdbus_conn *src, struct kdbus_kmsg *kmsg)
 	/* send message */
 
 	if (!is_signal)
-		kdbus_bus_eavesdrop(bus, src, kmsg);
+		kdbus_bus_eavesdrop(bus, src, staging);
 
-	ret = kdbus_conn_entry_insert(src, dst, kmsg, wait, name);
+	ret = kdbus_conn_entry_insert(src, dst, staging, wait, name);
 	if (ret < 0 && !is_signal)
 		goto exit;
 
@@ -1353,7 +1342,7 @@ void kdbus_conn_move_messages(struct kdbus_conn *conn_dst,
 			continue;
 
 		if (!(conn_dst->flags & KDBUS_HELLO_ACCEPT_FD) &&
-		    e->msg_res && e->msg_res->fds_count > 0) {
+		    e->gaps && e->gaps->n_fds > 0) {
 			kdbus_conn_lost_message(conn_dst);
 			kdbus_queue_entry_free(e);
 			continue;
@@ -1930,7 +1919,6 @@ int kdbus_cmd_send(struct kdbus_conn *conn, struct file *f, void __user *argp)
 {
 	struct kdbus_cmd_send *cmd;
 	struct kdbus_staging *staging = NULL;
-	struct kdbus_kmsg *kmsg = NULL;
 	struct kdbus_msg *msg = NULL;
 	struct file *cancel_fd = NULL;
 	int ret, ret2;
@@ -2021,23 +2009,16 @@ int kdbus_cmd_send(struct kdbus_conn *conn, struct file *f, void __user *argp)
 		goto exit;
 	}
 
-	kmsg = kdbus_kmsg_new_from_cmd(conn, cmd);
-	if (IS_ERR(kmsg)) {
-		ret = PTR_ERR(kmsg);
-		kmsg = NULL;
-		goto exit;
-	}
-
-	if (kmsg->msg.dst_id == KDBUS_DST_ID_BROADCAST) {
+	if (msg->dst_id == KDBUS_DST_ID_BROADCAST) {
 		down_read(&conn->ep->bus->name_registry->rwlock);
-		kdbus_bus_broadcast(conn->ep->bus, conn, kmsg);
+		kdbus_bus_broadcast(conn->ep->bus, conn, staging);
 		up_read(&conn->ep->bus->name_registry->rwlock);
 	} else if (cmd->flags & KDBUS_SEND_SYNC_REPLY) {
 		struct kdbus_reply *r;
 		ktime_t exp;
 
-		exp = ns_to_ktime(kmsg->msg.timeout_ns);
-		r = kdbus_conn_call(conn, kmsg, exp);
+		exp = ns_to_ktime(msg->timeout_ns);
+		r = kdbus_conn_call(conn, staging, exp);
 		if (IS_ERR(r)) {
 			ret = PTR_ERR(r);
 			goto exit;
@@ -2047,13 +2028,13 @@ int kdbus_cmd_send(struct kdbus_conn *conn, struct file *f, void __user *argp)
 		kdbus_reply_unref(r);
 		if (ret < 0)
 			goto exit;
-	} else if ((kmsg->msg.flags & KDBUS_MSG_EXPECT_REPLY) ||
-		   kmsg->msg.cookie_reply == 0) {
-		ret = kdbus_conn_unicast(conn, kmsg);
+	} else if ((msg->flags & KDBUS_MSG_EXPECT_REPLY) ||
+		   msg->cookie_reply == 0) {
+		ret = kdbus_conn_unicast(conn, staging);
 		if (ret < 0)
 			goto exit;
 	} else {
-		ret = kdbus_conn_reply(conn, kmsg);
+		ret = kdbus_conn_reply(conn, staging);
 		if (ret < 0)
 			goto exit;
 	}
@@ -2064,7 +2045,6 @@ int kdbus_cmd_send(struct kdbus_conn *conn, struct file *f, void __user *argp)
 exit:
 	if (cancel_fd)
 		fput(cancel_fd);
-	kdbus_kmsg_free(kmsg);
 	kdbus_staging_free(staging);
 	ret = kdbus_args_clear(&msg_args, ret);
 	return kdbus_args_clear(&args, ret);

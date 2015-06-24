@@ -14,6 +14,9 @@
 #ifndef __KDBUS_MESSAGE_H
 #define __KDBUS_MESSAGE_H
 
+#include <linux/fs.h>
+#include <linux/kref.h>
+#include <uapi/linux/kdbus.h>
 #include "util.h"
 #include "metadata.h"
 
@@ -114,6 +117,9 @@ struct kdbus_kmsg {
 
 struct kdbus_bus;
 struct kdbus_conn;
+struct kdbus_meta_conn;
+struct kdbus_meta_proc;
+struct kdbus_pool_slice;
 
 struct kdbus_kmsg *kdbus_kmsg_new_kernel(struct kdbus_bus *bus,
 					 u64 dst, u64 cookie_timeout,
