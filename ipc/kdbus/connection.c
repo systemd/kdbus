@@ -606,9 +606,9 @@ bool kdbus_conn_has_name(struct kdbus_conn *conn, const char *name)
 }
 
 struct kdbus_quota {
-	uint32_t memory;
-	uint16_t msgs;
-	uint8_t fds;
+	u32 memory;
+	u16 msgs;
+	u8 fds;
 };
 
 /**
