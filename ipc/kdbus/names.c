@@ -444,7 +444,7 @@ void kdbus_name_release_all(struct kdbus_name_registry *reg,
 
 	down_write(&reg->rwlock);
 
-	if (kdbus_conn_is_activator(conn)) {
+	if (conn->activator_of) {
 		activator = conn->activator_of->activator;
 		conn->activator_of->activator = NULL;
 	}
