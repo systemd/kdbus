@@ -83,7 +83,7 @@ diff:
 
 clean:
 	rm -f *.o *~ core .depend .*.cmd *.ko *.mod.c
-	rm -f ipc/kdbus/{*.ko,*.o,.*.cmd,*.order,kdbus.mod.c}
+	rm -f ipc/kdbus/{*.ko,*.o,.*.cmd,*.order,*.mod.c}
 	rm -f Module.markers Module.symvers modules.order
 	rm -f samples/kdbus/{kdbus-workers,*.o,modules.order,Module.symvers}
 	rm -rf samples/kdbus/{.*.cmd,.tmp_versions}
