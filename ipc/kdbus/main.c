@@ -12,6 +12,7 @@
  */
 
 #define pr_fmt(fmt)    KBUILD_MODNAME ": " fmt
+#include <linux/debugfs.h>
 #include <linux/fs.h>
 #include <linux/init.h>
 #include <linux/module.h>
@@ -83,6 +84,10 @@ static int __init kdbus_init(void)
 	if (ret)
 		return ret;
 
+	kdbus_node_debugfs_root = debugfs_create_dir(KBUILD_MODNAME, NULL);
+	if (!kdbus_node_debugfs_root)
+		pr_warn("cannot create debugfs root\n");
+
 	ret = kdbus_fs_init();
 	if (ret < 0) {
 		pr_err("cannot register filesystem: %d\n", ret);
@@ -93,6 +98,7 @@ static int __init kdbus_init(void)
 	return 0;
 
 exit_dir:
+	debugfs_remove(kdbus_node_debugfs_root);
 	sysfs_remove_mount_point(fs_kobj, KBUILD_MODNAME);
 	return ret;
 }
@@ -100,6 +106,7 @@ exit_dir:
 static void __exit kdbus_exit(void)
 {
 	kdbus_fs_exit();
+	debugfs_remove(kdbus_node_debugfs_root);
 	sysfs_remove_mount_point(fs_kobj, KBUILD_MODNAME);
 	ida_destroy(&kdbus_node_ida);
 }

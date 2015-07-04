@@ -12,6 +12,7 @@
  */
 
 #include <linux/atomic.h>
+#include <linux/debugfs.h>
 #include <linux/fs.h>
 #include <linux/idr.h>
 #include <linux/kdev_t.h>
@@ -232,6 +233,9 @@
 /* global unique ID mapping for kdbus nodes */
 DEFINE_IDA(kdbus_node_ida);
 
+/* debugfs root of this module */
+struct dentry *kdbus_node_debugfs_root;
+
 /**
  * kdbus_node_name_hash() - hash a name
  * @name:	The string to hash
@@ -331,6 +335,57 @@ void kdbus_node_init(struct kdbus_node *node, unsigned int type)
 	node->children = RB_ROOT;
 	init_waitqueue_head(&node->waitq);
 	atomic_set(&node->active, KDBUS_NODE_NEW);
+}
+
+/**
+ * kdbus_node_add_debugfs() - add node to debugfs
+ * @node:	node to add
+ * @parent:	debugfs node to link this under, or NULL/ERR_PTR
+ *
+ * This tries to create a directory for @node in debugfs, underneath its parent.
+ * If the parent dentry is NULL/ERR_PTR, nothing is done. If the debugfs
+ * operation fails, a warning is printed.
+ *
+ * The caller is responsible to protect the parent pointer and serialize access
+ * to it.
+ */
+static void kdbus_node_add_debugfs(struct kdbus_node *node,
+				   struct dentry *parent)
+{
+	if (IS_ERR_OR_NULL(parent))
+		return;
+
+	if (node->type != KDBUS_NODE_DOMAIN &&
+	    node->type != KDBUS_NODE_BUS &&
+	    node->type != KDBUS_NODE_ENDPOINT &&
+	    node->type != KDBUS_NODE_CONNECTION)
+		return;
+
+	node->debugfs = debugfs_create_dir(node->name, parent);
+	if (!node->debugfs)
+		pr_warn("cannot create debugfs-dir for node %s\n", node->name);
+}
+
+/**
+ * kdbus_node_remove_debugfs() - remove node from debugfs
+ * @node:	node to remove
+ *
+ * This removes the given node from debugfs. If it was never added to debugfs,
+ * this is a no-op. You may call this function multiple times just fine (but
+ * the caller must serialize those calls).
+ *
+ * This function must be called once the node is deactivated and self-drained.
+ * Otherwise, external users might still own an active-reference and access
+ * node->debugfs.
+ *
+ * Note that this function expects the caller to remove all children before
+ * removing the node itself. Otherwise, this will silently fail and leak
+ * debugfs entries.
+ */
+static void kdbus_node_remove_debugfs(struct kdbus_node *node)
+{
+	debugfs_remove(node->debugfs);
+	node->debugfs = NULL;
 }
 
 /**
@@ -467,6 +522,7 @@ struct kdbus_node *kdbus_node_unref(struct kdbus_node *node)
 		struct kdbus_node safe = *node;
 
 		WARN_ON(atomic_read(&node->active) != KDBUS_NODE_DRAINED);
+		WARN_ON(node->debugfs);
 
 		if (node->parent) {
 			mutex_lock(&node->parent->lock);
@@ -562,6 +618,17 @@ bool kdbus_node_activate(struct kdbus_node *node)
 
 	mutex_lock(&node->lock);
 	if (atomic_read(&node->active) == KDBUS_NODE_NEW) {
+		/*
+		 * Our parent must already be activated, otherwise
+		 * kdbus_node_link() must have failed. Furthermore, the parent
+		 * cannot be drained, otherwise this node must have been
+		 * deactivated already. With this in mind, we can safely
+		 * dereference parent->debugfs here.
+		 */
+		kdbus_node_add_debugfs(node, node->parent ?
+					     node->parent->debugfs :
+					     kdbus_node_debugfs_root);
+
 		atomic_sub(KDBUS_NODE_NEW, &node->active);
 		/* activated nodes have ref +1 */
 		kdbus_node_ref(node);
@@ -807,12 +874,12 @@ void kdbus_node_drain(struct kdbus_node *node)
 			if (pos->release_cb)
 				pos->release_cb(pos, v == KDBUS_NODE_BIAS);
 
+			kdbus_node_remove_debugfs(pos);
+			kdbus_fs_flush(pos);
+
 			/* mark as DRAINED */
 			atomic_set(&pos->active, KDBUS_NODE_DRAINED);
 			wake_up_all(&pos->waitq);
-
-			/* drop VFS cache */
-			kdbus_fs_flush(pos);
 
 			/*
 			 * If the node was activated and someone subtracted BIAS

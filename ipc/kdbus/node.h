@@ -59,6 +59,9 @@ struct kdbus_node {
 	struct kdbus_node *parent; /* may be NULL */
 	struct rb_node rb;
 
+	/* valid while active until drained */
+	struct dentry *debugfs; /* may be NULL/ERR_PTR */
+
 	/* dynamic list of children */
 	struct rb_root children;
 };
@@ -66,6 +69,7 @@ struct kdbus_node {
 #define kdbus_node_from_rb(_node) rb_entry((_node), struct kdbus_node, rb)
 
 extern struct ida kdbus_node_ida;
+extern struct dentry *kdbus_node_debugfs_root;
 
 void kdbus_node_init(struct kdbus_node *node, unsigned int type);
 
