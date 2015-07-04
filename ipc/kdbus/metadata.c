@@ -1156,18 +1156,187 @@ exit:
 	return ret;
 }
 
+enum {
+	KDBUS_META_PROC_NONE,
+	KDBUS_META_PROC_NORMAL,
+};
+
 /**
- * kdbus_meta_calc_attach_flags() - calculate attach flags for a sender
- *				    and a receiver
- * @sender:		Sending connection
- * @receiver:		Receiving connection
+ * kdbus_proc_permission() - check /proc permissions on target pid
+ * @pid_ns:		namespace we operate in
+ * @cred:		credentials of requestor
+ * @target:		target process
  *
- * Return: the attach flags both the sender and the receiver have opted-in
- * for.
+ * This checks whether a process with credentials @cred can access information
+ * of @target in the namespace @pid_ns. This tries to follow /proc permissions,
+ * but is slightly more restrictive.
+ *
+ * Return: The /proc access level (KDBUS_META_PROC_*) is returned.
  */
-u64 kdbus_meta_calc_attach_flags(const struct kdbus_conn *sender,
-				 const struct kdbus_conn *receiver)
+static unsigned int kdbus_proc_permission(const struct pid_namespace *pid_ns,
+					  const struct cred *cred,
+					  struct pid *target)
 {
-	return atomic64_read(&sender->attach_flags_send) &
-	       atomic64_read(&receiver->attach_flags_recv);
+	if (pid_ns->hide_pid < 1)
+		return KDBUS_META_PROC_NORMAL;
+
+	/* XXX: we need groups_search() exported for aux-groups */
+	if (gid_eq(cred->egid, pid_ns->pid_gid))
+		return KDBUS_META_PROC_NORMAL;
+
+	/*
+	 * XXX: If ptrace_may_access(PTRACE_MODE_READ) is granted, you can
+	 * overwrite hide_pid. However, ptrace_may_access() only supports
+	 * checking 'current', hence, we cannot use this here. But we
+	 * simply decide to not support this override, so no need to worry.
+	 */
+
+	return KDBUS_META_PROC_NONE;
+}
+
+/**
+ * kdbus_meta_proc_mask() - calculate which metadata would be visible to
+ *			    a connection via /proc
+ * @prv_pid:		pid of metadata provider
+ * @req_pid:		pid of metadata requestor
+ * @req_cred:		credentials of metadata reqeuestor
+ * @wanted:		metadata that is requested
+ *
+ * This checks which metadata items of @prv_pid can be read via /proc by the
+ * requestor @req_pid.
+ *
+ * Return: Set of metadata flags the requestor can see (limited by @wanted).
+ */
+static u64 kdbus_meta_proc_mask(struct pid *prv_pid,
+				struct pid *req_pid,
+				const struct cred *req_cred,
+				u64 wanted)
+{
+	struct pid_namespace *prv_ns, *req_ns;
+	unsigned int proc;
+
+	prv_ns = ns_of_pid(prv_pid);
+	req_ns = ns_of_pid(req_pid);
+
+	/*
+	 * If the sender is not visible in the receiver namespace, then the
+	 * receiver cannot access the sender via its own procfs. Hence, we do
+	 * not attach any additional metadata.
+	 */
+	if (!pid_nr_ns(prv_pid, req_ns))
+		return 0;
+
+	/*
+	 * If the pid-namespace of the receiver has hide_pid set, it cannot see
+	 * any process but its own. We shortcut this /proc permission check if
+	 * provider and requestor are the same. If not, we perform rather
+	 * expensive /proc permission checks.
+	 */
+	if (prv_pid == req_pid)
+		proc = KDBUS_META_PROC_NORMAL;
+	else
+		proc = kdbus_proc_permission(req_ns, req_cred, prv_pid);
+
+	/* you need /proc access to read standard process attributes */
+	if (proc < KDBUS_META_PROC_NORMAL)
+		wanted &= ~(KDBUS_ATTACH_TID_COMM |
+			    KDBUS_ATTACH_PID_COMM |
+			    KDBUS_ATTACH_SECLABEL |
+			    KDBUS_ATTACH_CMDLINE |
+			    KDBUS_ATTACH_CGROUP |
+			    KDBUS_ATTACH_AUDIT |
+			    KDBUS_ATTACH_CAPS |
+			    KDBUS_ATTACH_EXE);
+
+	/* clear all non-/proc flags */
+	return wanted & (KDBUS_ATTACH_TID_COMM |
+			 KDBUS_ATTACH_PID_COMM |
+			 KDBUS_ATTACH_SECLABEL |
+			 KDBUS_ATTACH_CMDLINE |
+			 KDBUS_ATTACH_CGROUP |
+			 KDBUS_ATTACH_AUDIT |
+			 KDBUS_ATTACH_CAPS |
+			 KDBUS_ATTACH_EXE);
+}
+
+/**
+ * kdbus_meta_get_mask() - calculate attach flags mask for metadata request
+ * @prv_pid:		pid of metadata provider
+ * @prv_mask:		mask of metadata the provide grants unchecked
+ * @req_pid:		pid of metadata requestor
+ * @req_cred:		credentials of metadata requestor
+ * @req_mask:		mask of metadata that is requested
+ *
+ * This calculates the metadata items that the requestor @req_pid can access
+ * from the metadata provider @prv_pid. This permission check consists of
+ * several different parts:
+ *  - Providers can grant metadata items unchecked. Regardless of their type,
+ *    they're always granted to the requestor. This mask is passed as @prv_mask.
+ *  - Basic items (credentials and connection metadata) are granted implicitly
+ *    to everyone. They're publicly available to any bus-user that can see the
+ *    provider.
+ *  - Process credentials that are not granted implicitly follow the same
+ *    permission checks as /proc. This means, we always assume a requestor
+ *    process has access to their *own* /proc mount, if they have access to
+ *    kdbusfs.
+ *
+ * Return: Mask of metadata that is granted.
+ */
+static u64 kdbus_meta_get_mask(struct pid *prv_pid, u64 prv_mask,
+			       struct pid *req_pid,
+			       const struct cred *req_cred, u64 req_mask)
+{
+	u64 missing, impl_mask, proc_mask = 0;
+
+	/*
+	 * Connection metadata and basic unix process credentials are
+	 * transmitted implicitly, and cannot be suppressed. Both are required
+	 * to perform user-space policies on the receiver-side. Furthermore,
+	 * connection metadata is public state, anyway, and unix credentials
+	 * are needed for UDS-compatibility. We extend them slightly by
+	 * auxiliary groups and additional uids/gids/pids.
+	 */
+	impl_mask = /* connection metadata */
+		    KDBUS_ATTACH_CONN_DESCRIPTION |
+		    KDBUS_ATTACH_TIMESTAMP |
+		    KDBUS_ATTACH_NAMES |
+		    /* credentials and pids */
+		    KDBUS_ATTACH_AUXGROUPS |
+		    KDBUS_ATTACH_CREDS |
+		    KDBUS_ATTACH_PIDS;
+
+	/*
+	 * Calculate the set of metadata that is not granted implicitly nor by
+	 * the sender, but still requested by the receiver. If any are left,
+	 * perform rather expensive /proc access checks for them.
+	 */
+	missing = req_mask & ~((prv_mask | impl_mask) & req_mask);
+	if (missing)
+		proc_mask = kdbus_meta_proc_mask(prv_pid, req_pid, req_cred,
+						 missing);
+
+	return (prv_mask | impl_mask | proc_mask) & req_mask;
+}
+
+/**
+ */
+u64 kdbus_meta_info_mask(const struct kdbus_conn *conn, u64 mask)
+{
+	return kdbus_meta_get_mask(conn->pid,
+				   atomic64_read(&conn->attach_flags_send),
+				   task_pid(current),
+				   current_cred(),
+				   mask);
+}
+
+/**
+ */
+u64 kdbus_meta_msg_mask(const struct kdbus_conn *snd,
+			const struct kdbus_conn *rcv)
+{
+	return kdbus_meta_get_mask(task_pid(current),
+				   atomic64_read(&snd->attach_flags_send),
+				   rcv->pid,
+				   rcv->cred,
+				   atomic64_read(&rcv->attach_flags_recv));
 }

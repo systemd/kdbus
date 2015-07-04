@@ -61,6 +61,7 @@ struct kdbus_staging;
  * @cred:		The credentials of the connection at creation time
  * @user_ns:		User namespace at creation time
  * @pid_ns:		Pid namespace at creation time
+ * @pid:		Pid at creation time
  * @root_path:		Root path at creation time
  * @name_count:		Number of owned well-known names
  * @request_count:	Number of pending requests issued by this
@@ -102,6 +103,7 @@ struct kdbus_conn {
 	const struct cred *cred;
 	struct user_namespace *user_ns;
 	struct pid_namespace *pid_ns;
+	struct pid *pid;
 	struct path root_path;
 	atomic_t name_count;
 	atomic_t request_count;

@@ -849,7 +849,7 @@ static int kdbus_staging_collect_metadata(struct kdbus_staging *staging,
 	int ret;
 
 	if (src)
-		attach = kdbus_meta_calc_attach_flags(src, dst);
+		attach = kdbus_meta_msg_mask(src, dst);
 	else
 		attach = KDBUS_ATTACH_TIMESTAMP; /* metadata for kernel msgs */
 

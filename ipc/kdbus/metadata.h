@@ -79,7 +79,8 @@ int kdbus_meta_emit(struct kdbus_meta_proc *mp,
 		    u64 mask,
 		    struct kdbus_item **out_items,
 		    size_t *out_size);
-u64 kdbus_meta_calc_attach_flags(const struct kdbus_conn *sender,
-				 const struct kdbus_conn *receiver);
+u64 kdbus_meta_info_mask(const struct kdbus_conn *conn, u64 mask);
+u64 kdbus_meta_msg_mask(const struct kdbus_conn *snd,
+			const struct kdbus_conn *rcv);
 
 #endif
