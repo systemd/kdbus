@@ -78,6 +78,7 @@ struct kdbus_bloom_mask {
  *			KDBUS_ITEM_NAME_{ADD,REMOVE,CHANGE},
  *			KDBUS_ITEM_ID_REMOVE
  * @src_id:		ID to match against, used with KDBUS_ITEM_ID
+ * @dst_id:		Message destination ID, used with KDBUS_ITEM_DST_ID
  * @rules_entry:	Entry in the entry's rules list
  */
 struct kdbus_match_rule {
@@ -90,6 +91,7 @@ struct kdbus_match_rule {
 			u64 new_id;
 		};
 		u64 src_id;
+		u64 dst_id;
 	};
 	struct list_head rules_entry;
 };
@@ -112,6 +114,7 @@ static void kdbus_match_rule_free(struct kdbus_match_rule *rule)
 		break;
 
 	case KDBUS_ITEM_ID:
+	case KDBUS_ITEM_DST_ID:
 	case KDBUS_ITEM_ID_ADD:
 	case KDBUS_ITEM_ID_REMOVE:
 		break;
@@ -215,6 +218,9 @@ static bool kdbus_match_rule_conn(const struct kdbus_match_rule *r,
 		return kdbus_match_bloom(s->bloom_filter, &r->bloom_mask, c);
 	case KDBUS_ITEM_ID:
 		return r->src_id == c->id || r->src_id == KDBUS_MATCH_ID_ANY;
+	case KDBUS_ITEM_DST_ID:
+		return r->dst_id == s->msg->dst_id ||
+		       r->dst_id == KDBUS_MATCH_ID_ANY;
 	case KDBUS_ITEM_NAME:
 		return kdbus_conn_has_name(c, r->name);
 	default:
@@ -328,6 +334,7 @@ static int kdbus_match_db_remove_unlocked(struct kdbus_match_db *mdb,
  * KDBUS_ITEM_BLOOM_MASK:	A bloom mask
  * KDBUS_ITEM_NAME:		A connection's source name
  * KDBUS_ITEM_ID:		A connection ID
+ * KDBUS_ITEM_DST_ID:		A connection ID
  * KDBUS_ITEM_NAME_ADD:
  * KDBUS_ITEM_NAME_REMOVE:
  * KDBUS_ITEM_NAME_CHANGE:	Well-known name changes, carry
@@ -339,9 +346,9 @@ static int kdbus_match_db_remove_unlocked(struct kdbus_match_db *mdb,
  * For kdbus_notify_{id,name}_change structs, only the ID and name fields
  * are looked at when adding an entry. The flags are unused.
  *
- * Also note that KDBUS_ITEM_BLOOM_MASK, KDBUS_ITEM_NAME and KDBUS_ITEM_ID
- * are used to match messages from userspace, while the others apply to
- * kernel-generated notifications.
+ * Also note that KDBUS_ITEM_BLOOM_MASK, KDBUS_ITEM_NAME, KDBUS_ITEM_ID,
+ * and KDBUS_ITEM_DST_ID are used to match messages from userspace, while the
+ * others apply to kernel-generated notifications.
  *
  * Return: >=0 on success, negative error code on failure.
  */
@@ -358,6 +365,7 @@ int kdbus_cmd_match_add(struct kdbus_conn *conn, void __user *argp)
 		{ .type = KDBUS_ITEM_BLOOM_MASK, .multiple = true },
 		{ .type = KDBUS_ITEM_NAME, .multiple = true },
 		{ .type = KDBUS_ITEM_ID, .multiple = true },
+		{ .type = KDBUS_ITEM_DST_ID, .multiple = true },
 		{ .type = KDBUS_ITEM_NAME_ADD, .multiple = true },
 		{ .type = KDBUS_ITEM_NAME_REMOVE, .multiple = true },
 		{ .type = KDBUS_ITEM_NAME_CHANGE, .multiple = true },
@@ -438,6 +446,10 @@ int kdbus_cmd_match_add(struct kdbus_conn *conn, void __user *argp)
 
 		case KDBUS_ITEM_ID:
 			rule->src_id = item->id;
+			break;
+
+		case KDBUS_ITEM_DST_ID:
+			rule->dst_id = item->id;
 			break;
 
 		case KDBUS_ITEM_NAME_ADD:

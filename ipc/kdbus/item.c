@@ -147,6 +147,7 @@ int kdbus_item_validate(const struct kdbus_item *item)
 	case KDBUS_ITEM_ATTACH_FLAGS_SEND:
 	case KDBUS_ITEM_ATTACH_FLAGS_RECV:
 	case KDBUS_ITEM_ID:
+	case KDBUS_ITEM_DST_ID:
 		if (payload_size != sizeof(u64))
 			return -EINVAL;
 		break;
