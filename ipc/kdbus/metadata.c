@@ -896,8 +896,8 @@ static struct kdbus_item *kdbus_write_full(struct kdbus_item **iter,
 static size_t kdbus_meta_write(struct kdbus_meta_staging *staging, void *mem,
 			       size_t size)
 {
-	struct user_namespace *user_ns = staging->conn->user_ns;
-	struct pid_namespace *pid_ns = staging->conn->pid_ns;
+	struct user_namespace *user_ns = staging->conn->cred->user_ns;
+	struct pid_namespace *pid_ns = ns_of_pid(staging->conn->pid);
 	struct kdbus_item *item = NULL, *items = mem;
 	u8 *end, *owned_names_end = NULL;
 

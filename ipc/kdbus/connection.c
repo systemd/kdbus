@@ -130,8 +130,6 @@ static struct kdbus_conn *kdbus_conn_new(struct kdbus_ep *ep, bool privileged,
 	atomic_set(&conn->lost_count, 0);
 	INIT_DELAYED_WORK(&conn->work, kdbus_reply_list_scan_work);
 	conn->cred = get_current_cred();
-	conn->user_ns = get_user_ns(current_user_ns());
-	conn->pid_ns = get_pid_ns(task_active_pid_ns(current));
 	conn->pid = get_pid(task_pid(current));
 	get_fs_root(current->fs, &conn->root_path);
 	init_waitqueue_head(&conn->wait);
@@ -284,8 +282,6 @@ static void __kdbus_conn_free(struct kref *kref)
 	kdbus_ep_unref(conn->ep);
 	path_put(&conn->root_path);
 	put_pid(conn->pid);
-	put_pid_ns(conn->pid_ns);
-	put_user_ns(conn->user_ns);
 	put_cred(conn->cred);
 	kfree(conn->description);
 	kfree(conn->quota);
