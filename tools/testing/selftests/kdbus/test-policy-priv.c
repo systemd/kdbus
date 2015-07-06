@@ -110,6 +110,12 @@ static int test_policy_priv_by_broadcast(const char *bus,
 					     KDBUS_DST_ID_BROADCAST);
 			ASSERT_RETURN(ret == 0);
 
+			/* drop own broadcast */
+			ret = kdbus_msg_recv(child_2, &msg, NULL);
+			ASSERT_RETURN(ret == 0);
+			ASSERT_RETURN(msg->src_id == child_2->id);
+			kdbus_msg_free(msg);
+
 			/* Use a little bit high time */
 			ret = kdbus_msg_recv_poll(child_2, 1000,
 						  &msg, NULL);
@@ -144,6 +150,12 @@ static int test_policy_priv_by_broadcast(const char *bus,
 						expected_cookie, 0, 0, 0,
 						KDBUS_DST_ID_BROADCAST);
 				ASSERT_EXIT(ret == 0);
+
+				/* drop own broadcast */
+				ret = kdbus_msg_recv(child_2, &msg, NULL);
+				ASSERT_RETURN(ret == 0);
+				ASSERT_RETURN(msg->src_id == child_2->id);
+				kdbus_msg_free(msg);
 
 				/* Use a little bit high time */
 				ret = kdbus_msg_recv_poll(child_2, 1000,
@@ -313,11 +325,6 @@ static int test_broadcast_after_policy_upload(struct kdbus_test_env *env)
 	 * receiver is not able to TALK to that name.
 	 */
 
-	ret = test_policy_priv_by_broadcast(env->buspath, owner_a,
-					    DO_NOT_DROP,
-					    -ETIMEDOUT, -ETIMEDOUT);
-	ASSERT_RETURN(ret == 0);
-
 	/* Activate matching for a privileged connection */
 	ret = kdbus_add_match_empty(owner_a);
 	ASSERT_RETURN(ret == 0);
@@ -407,6 +414,15 @@ static int test_broadcast_after_policy_upload(struct kdbus_test_env *env)
 	ret = kdbus_msg_send(owner_a, NULL, expected_cookie, 0,
 			     0, 0, KDBUS_DST_ID_BROADCAST);
 	ASSERT_RETURN(ret == 0);
+
+	ret = kdbus_msg_recv_poll(owner_a, 100, &msg, NULL);
+	ASSERT_RETURN(ret == 0);
+	ASSERT_RETURN(msg->cookie == expected_cookie);
+
+	/* Check src ID */
+	ASSERT_RETURN(msg->src_id == owner_a->id);
+
+	kdbus_msg_free(msg);
 
 	ret = kdbus_msg_recv_poll(owner_b, 100, &msg, NULL);
 	ASSERT_RETURN(ret == 0);

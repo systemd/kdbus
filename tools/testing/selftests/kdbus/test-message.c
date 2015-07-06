@@ -54,9 +54,12 @@ int kdbus_test_message_basic(struct kdbus_test_env *env)
 			     KDBUS_DST_ID_BROADCAST);
 	ASSERT_RETURN(ret == 0);
 
-	/* Make sure that we do not get our own broadcasts */
-	ret = kdbus_msg_recv(sender, NULL, NULL);
-	ASSERT_RETURN(ret == -EAGAIN);
+	/* Make sure that we do get our own broadcasts */
+	ret = kdbus_msg_recv(sender, &msg, &offset);
+	ASSERT_RETURN(ret == 0);
+	ASSERT_RETURN(msg->cookie == cookie);
+
+	kdbus_msg_free(msg);
 
 	/* ... and receive on the 2nd */
 	ret = kdbus_msg_recv_poll(conn, 100, &msg, &offset);

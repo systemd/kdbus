@@ -263,8 +263,6 @@ void kdbus_bus_broadcast(struct kdbus_bus *bus,
 
 	down_read(&bus->conn_rwlock);
 	hash_for_each(bus->conn_hash, i, conn_dst, hentry) {
-		if (conn_dst->id == staging->msg->src_id)
-			continue;
 		if (!kdbus_conn_is_ordinary(conn_dst))
 			continue;
 
