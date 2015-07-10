@@ -78,7 +78,7 @@ static void kdbus_ep_release(struct kdbus_node *node, bool was_active)
  * @gid:		The gid of the node
  * @is_custom:		Whether this is a custom endpoint
  *
- * This function will create a new enpoint with the given
+ * This function will create a new endpoint with the given
  * name and properties for a given bus.
  *
  * Return: a new kdbus_ep on success, ERR_PTR on failure.

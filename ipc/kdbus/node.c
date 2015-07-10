@@ -120,7 +120,7 @@
  * new active references can be acquired.
  * Once all active references are dropped, the node is considered 'drained'. Now
  * kdbus_node_deactivate() is called on each child of the node before we
- * continue deactvating our node. That is, once all children are entirely
+ * continue deactivating our node. That is, once all children are entirely
  * deactivated, we call ->release_cb() of our node. ->release_cb() can release
  * any resources on that node which are bound to the "active" state of a node.
  * When done, we unlink the node from its parent rb-tree, mark it as
@@ -637,7 +637,7 @@ void kdbus_node_deactivate(struct kdbus_node *node)
 			kdbus_fs_flush(pos);
 
 			/*
-			 * If the node was activated and somone subtracted BIAS
+			 * If the node was activated and someone subtracted BIAS
 			 * from it to deactivate it, we, and only us, are
 			 * responsible to release the extra ref-count that was
 			 * taken once in kdbus_node_activate().

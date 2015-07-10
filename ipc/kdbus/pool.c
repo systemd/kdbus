@@ -44,7 +44,7 @@
  * The receiver's buffer, managed as a pool of allocated and free
  * slices containing the queued messages.
  *
- * Messages sent with KDBUS_CMD_SEND are copied direcly by the
+ * Messages sent with KDBUS_CMD_SEND are copied directly by the
  * sending process into the receiver's pool.
  *
  * Messages received with KDBUS_CMD_RECV just return the offset

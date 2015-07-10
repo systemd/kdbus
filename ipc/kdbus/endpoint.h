@@ -25,7 +25,7 @@ struct kdbus_bus;
 struct kdbus_user;
 
 /**
- * struct kdbus_ep - enpoint to access a bus
+ * struct kdbus_ep - endpoint to access a bus
  * @node:		The kdbus node
  * @lock:		Endpoint data lock
  * @bus:		Bus behind this endpoint
@@ -33,7 +33,7 @@ struct kdbus_user;
  * @policy_db:		Uploaded policy
  * @conn_list:		Connections of this endpoint
  *
- * An enpoint offers access to a bus; the default endpoint node name is "bus".
+ * An endpoint offers access to a bus; the default endpoint node name is "bus".
  * Additional custom endpoints to the same bus can be created and they can
  * carry their own policies/filters.
  */

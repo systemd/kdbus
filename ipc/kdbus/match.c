@@ -66,7 +66,7 @@ struct kdbus_bloom_mask {
 
 /**
  * struct kdbus_match_rule - a rule appended to a match entry
- * @type:		An item type to match agains
+ * @type:		An item type to match against
  * @bloom_mask:		Bloom mask to match a message's filter against, used
  *			with KDBUS_ITEM_BLOOM_MASK
  * @name:		Name to match against, used with KDBUS_ITEM_NAME,

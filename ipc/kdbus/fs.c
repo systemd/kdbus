@@ -74,7 +74,7 @@ static int fs_dir_fop_iterate(struct file *file, struct dir_context *ctx)
 	 * closest node to that position and cannot use our node pointer. This
 	 * means iterating the rb-tree to find the closest match and start over
 	 * from there.
-	 * Note that hash values are not neccessarily unique. Therefore, llseek
+	 * Note that hash values are not necessarily unique. Therefore, llseek
 	 * is not guaranteed to seek to the same node that you got when you
 	 * retrieved the position. Seeking to 0, 1, 2 and >=INT_MAX is safe,
 	 * though. We could use the inode-number as position, but this would

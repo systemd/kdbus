@@ -344,7 +344,7 @@ err:
  * In order to allow atomic replacement of rules, the function first removes
  * all entries that have been created for the given owner previously.
  *
- * Callers to this function must make sur that the owner is a custom
+ * Callers to this function must make sure that the owner is a custom
  * endpoint, or if the endpoint is a default endpoint, then it must be
  * either a policy holder or an activator.
  *
