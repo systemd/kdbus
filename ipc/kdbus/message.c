@@ -946,6 +946,16 @@ struct kdbus_pool_slice *kdbus_staging_emit(struct kdbus_staging *staging,
 		++v;
 
 		msg_size = KDBUS_ALIGN8(msg_size) + meta_size;
+	} else {
+		/* metadata items */
+		v->iov_len = 0;
+		v->iov_base = (void __user *)zeros;
+		++v;
+
+		/* padding after metadata */
+		v->iov_len = 0;
+		v->iov_base = (void __user *)zeros;
+		++v;
 	}
 
 	/* ... payload iovecs are already filled in ... */
