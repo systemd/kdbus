@@ -38,3 +38,7 @@ mandocs: $(MANFILES)
 htmldocs: $(HTMLFILES)
 
 clean-files := $(MANFILES) $(HTMLFILES)
+
+# we don't support other %docs targets right now
+%docs:
+	@true
