@@ -920,7 +920,7 @@ struct kdbus_pool_slice *kdbus_staging_emit(struct kdbus_staging *staging,
 
 	/* msg.size */
 	v->iov_len = sizeof(msg_size);
-	v->iov_base = &msg_size;
+	v->iov_base = (void __user *)&msg_size;
 	++v;
 
 	/* msg (after msg.size) plus items */
@@ -937,7 +937,7 @@ struct kdbus_pool_slice *kdbus_staging_emit(struct kdbus_staging *staging,
 	if (meta_size > 0) {
 		/* metadata items */
 		v->iov_len = meta_size;
-		v->iov_base = meta_items;
+		v->iov_base = (void __user *)meta_items;
 		++v;
 
 		/* padding after metadata */
