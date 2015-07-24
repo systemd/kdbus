@@ -886,9 +886,9 @@ struct kdbus_pool_slice *kdbus_staging_emit(struct kdbus_staging *staging,
 {
 	struct kdbus_item *item, *meta_items = NULL;
 	struct kdbus_pool_slice *slice = NULL;
-	size_t off, size, msg_size, meta_size;
+	size_t off, size, meta_size;
 	struct iovec *v;
-	u64 attach;
+	u64 attach, msg_size;
 	int ret;
 
 	/*
