@@ -114,4 +114,9 @@ tt: tt-prepare
 stt: tt-prepare
 	sudo tools/testing/selftests/kdbus/kdbus-test -m kdbus$(EXT) ; (R=$$? ; dmesg ; exit $$R)
 
+www_target = www.freedesktop.org:/srv/www.freedesktop.org/www/software/systemd
+
+doc-sync: htmldocs
+	rsync -rlv --delete-excluded --include="*.html" --exclude="*" --omit-dir-times Documentation/kdbus/ $(www_target)/kdbus/
+
 .PHONY: all module tests clean install uninstall tt-prepare tt stt
