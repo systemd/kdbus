@@ -35,15 +35,20 @@ static int conn_is_name_owner(const struct kdbus_conn *conn,
 		struct kdbus_item *item;
 		const char *n = NULL;
 
-		KDBUS_ITEM_FOREACH(item, name, items)
-			if (item->type == KDBUS_ITEM_OWNED_NAME)
+		KDBUS_ITEM_FOREACH(item, name, items) {
+			if (item->type == KDBUS_ITEM_OWNED_NAME) {
 				n = item->name.name;
 
-		if (name->id == conn->id &&
-		    n && strcmp(needle, n) == 0) {
-			found = true;
-			break;
+				if (name->id == conn->id &&
+				    n && strcmp(needle, n) == 0) {
+					found = true;
+					break;
+				}
+			}
 		}
+
+		if (found)
+			break;
 	}
 
 	ret = kdbus_free(conn, cmd_list.offset);

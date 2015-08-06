@@ -1155,11 +1155,12 @@ int kdbus_list(struct kdbus_conn *conn, uint64_t flags)
 			if (item->type == KDBUS_ITEM_OWNED_NAME) {
 				n = item->name.name;
 				flags = item->name.flags;
-			}
 
-		kdbus_printf("%8llu flags=0x%08llx conn=0x%08llx '%s'\n",
-			     name->id, (unsigned long long) flags,
-			     name->flags, n);
+				kdbus_printf("%8llu flags=0x%08llx conn=0x%08llx '%s'\n",
+					     name->id,
+					     (unsigned long long) flags,
+					     name->flags, n);
+			}
 	}
 	kdbus_printf("\n");
 
