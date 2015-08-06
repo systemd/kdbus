@@ -59,9 +59,11 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/syscall.h>
 
 /* glibc < 2.7 does not ship sys/signalfd.h */
-#if __GLIBC__ >= 2 && __GLIBC_MINOR__ >= 7
+/* we require kernels with __NR_memfd_create */
+#if __GLIBC__ >= 2 && __GLIBC_MINOR__ >= 7 && defined(__NR_memfd_create)
 
 #include <ctype.h>
 #include <errno.h>
@@ -75,7 +77,6 @@
 #include <sys/mman.h>
 #include <sys/poll.h>
 #include <sys/signalfd.h>
-#include <sys/syscall.h>
 #include <sys/time.h>
 #include <sys/wait.h>
 #include <time.h>
