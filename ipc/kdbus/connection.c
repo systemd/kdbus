@@ -237,11 +237,21 @@ static struct kdbus_conn *kdbus_conn_new(struct kdbus_ep *ep,
 	 * Note that limits are always accounted against the real UID, not
 	 * the effective UID (cred->user always points to the accounting of
 	 * cred->uid, not cred->euid).
+	 * In case the caller is privileged, we allow changing the accounting
+	 * to the faked user.
 	 */
 	if (ep->user) {
 		conn->user = kdbus_user_ref(ep->user);
 	} else {
-		conn->user = kdbus_user_lookup(ep->bus->domain, current_uid());
+		kuid_t uid;
+
+		if (conn->meta_fake && uid_valid(conn->meta_fake->uid) &&
+		    conn->privileged)
+			uid = conn->meta_fake->uid;
+		else
+			uid = conn->cred->uid;
+
+		conn->user = kdbus_user_lookup(ep->bus->domain, uid);
 		if (IS_ERR(conn->user)) {
 			ret = PTR_ERR(conn->user);
 			conn->user = NULL;
