@@ -1123,7 +1123,7 @@ static int kdbus_conn_reply(struct kdbus_conn *src,
 	mutex_unlock(&dst->lock);
 
 	if (!reply) {
-		ret = -EPERM;
+		ret = -EBADSLT;
 		goto exit;
 	}
 

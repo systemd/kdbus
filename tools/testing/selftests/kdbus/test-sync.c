@@ -235,7 +235,7 @@ static void *run_thread_reply(void *data)
 
 	/* using an unknown cookie must fail */
 	ret = kdbus_msg_send_reply(conn_a, ~cookie, conn_b->id);
-	if (ret != -EPERM) {
+	if (ret != -EBADSLT) {
 		status = TEST_ERR;
 		goto exit_thread;
 	}
