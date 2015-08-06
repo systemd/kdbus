@@ -45,7 +45,7 @@ struct kdbus_arg {
  * @argv:		array of items this command supports
  * @user:		set by parser to user-space location of current command
  * @cmd:		set by parser to kernel copy of command payload
- * @cmd_buf:		512 bytes inline buf to avoid kmalloc() on small cmds
+ * @cmd_buf:		inline buf to avoid kmalloc() on small cmds
  * @items:		points to item array in @cmd
  * @items_size:		size of @items in bytes
  * @is_cmd:		whether this is a command-payload or msg-payload
@@ -55,7 +55,7 @@ struct kdbus_arg {
  * the object to kdbus_args_parse(). The parser will copy the command payload
  * into kernel-space and verify the correctness of the data.
  *
- * We use a 512 bytes buffer for small command payloads, to be allocated on
+ * We use a 256 bytes buffer for small command payloads, to be allocated on
  * stack on syscall entrance.
  */
 struct kdbus_args {
@@ -65,7 +65,7 @@ struct kdbus_args {
 
 	struct kdbus_cmd __user *user;
 	struct kdbus_cmd *cmd;
-	u8 cmd_buf[512];
+	u8 cmd_buf[256];
 
 	struct kdbus_item *items;
 	size_t items_size;
