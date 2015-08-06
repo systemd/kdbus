@@ -84,24 +84,8 @@ static struct kdbus_conn *kdbus_conn_new(struct kdbus_ep *ep,
 		struct kdbus_bloom_parameter bloom;
 	} bloom_item;
 
-	/*
-	 * A connection is considered privileged, if, and only if, it didn't
-	 * connect through a custom endpoint *and* it has CAP_IPC_OWNER on the
-	 * namespace of the current domain.
-	 * Additionally, a connection is considered equivalent to the bus owner
-	 * if it didn't connect through a custom endpoint *and* it either is
-	 * privileged or the same user as the bus owner.
-	 *
-	 * Bus owners and alike can bypass bus policies. Privileged connections
-	 * can additionally change accounting, modify kernel resources and
-	 * perform restricted operations, as long as they're privileged on the
-	 * same level as the resources they touch.
-	 */
-	privileged = !ep->user &&
-		     file_ns_capable(file, ep->bus->domain->user_namespace,
-				     CAP_IPC_OWNER);
-	owner = !ep->user &&
-		(privileged || uid_eq(file->f_cred->euid, ep->bus->node.uid));
+	privileged = kdbus_ep_is_privileged(ep, file);
+	owner = kdbus_ep_is_owner(ep, file);
 
 	is_monitor = hello->flags & KDBUS_HELLO_MONITOR;
 	is_activator = hello->flags & KDBUS_HELLO_ACTIVATOR;

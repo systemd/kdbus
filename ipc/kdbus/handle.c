@@ -395,14 +395,8 @@ static long kdbus_handle_ioctl_ep(struct file *file, unsigned int cmd,
 
 	switch (cmd) {
 	case KDBUS_CMD_ENDPOINT_MAKE: {
-		bool priv;
-
-		priv = uid_eq(file->f_cred->euid, bus->node.uid) ||
-		       file_ns_capable(file, bus->domain->user_namespace,
-				       CAP_IPC_OWNER);
-
 		/* creating custom endpoints is a privileged operation */
-		if (file_ep->user || !priv) {
+		if (!kdbus_ep_is_owner(file_ep, file)) {
 			ret = -EPERM;
 			break;
 		}
