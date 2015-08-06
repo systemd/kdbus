@@ -264,7 +264,6 @@ enum kdbus_handle_type {
  * @bus_owner:		bus this handle owns
  * @ep_owner:		endpoint this handle owns
  * @conn:		connection this handle owns
- * @privileged:		Flag to mark a handle as privileged
  */
 struct kdbus_handle {
 	struct mutex lock;
@@ -275,8 +274,6 @@ struct kdbus_handle {
 		struct kdbus_ep *ep_owner;
 		struct kdbus_conn *conn;
 	};
-
-	bool privileged:1;
 };
 
 static int kdbus_handle_open(struct inode *inode, struct file *file)
@@ -297,23 +294,6 @@ static int kdbus_handle_open(struct inode *inode, struct file *file)
 
 	mutex_init(&handle->lock);
 	handle->type = KDBUS_HANDLE_NONE;
-
-	if (node->type == KDBUS_NODE_ENDPOINT) {
-		struct kdbus_ep *ep = kdbus_ep_from_node(node);
-		struct kdbus_bus *bus = ep->bus;
-
-		/*
-		 * A connection is privileged if it is opened on an endpoint
-		 * without custom policy and either:
-		 *   * the user has CAP_IPC_OWNER in the domain user namespace
-		 * or
-		 *   * the callers euid matches the uid of the bus creator
-		 */
-		if (!ep->user &&
-		    (ns_capable(bus->domain->user_namespace, CAP_IPC_OWNER) ||
-		     uid_eq(file->f_cred->euid, bus->node.uid)))
-			handle->privileged = true;
-	}
 
 	file->private_data = handle;
 	ret = 0;
@@ -406,6 +386,7 @@ static long kdbus_handle_ioctl_ep(struct file *file, unsigned int cmd,
 	struct kdbus_handle *handle = file->private_data;
 	struct kdbus_node *node = file_inode(file)->i_private;
 	struct kdbus_ep *ep, *file_ep = kdbus_ep_from_node(node);
+	struct kdbus_bus *bus = file_ep->bus;
 	struct kdbus_conn *conn;
 	int ret = 0;
 
@@ -413,14 +394,20 @@ static long kdbus_handle_ioctl_ep(struct file *file, unsigned int cmd,
 		return -ESHUTDOWN;
 
 	switch (cmd) {
-	case KDBUS_CMD_ENDPOINT_MAKE:
+	case KDBUS_CMD_ENDPOINT_MAKE: {
+		bool priv;
+
+		priv = uid_eq(file->f_cred->euid, bus->node.uid) ||
+		       file_ns_capable(file, bus->domain->user_namespace,
+				       CAP_IPC_OWNER);
+
 		/* creating custom endpoints is a privileged operation */
-		if (!handle->privileged) {
+		if (file_ep->user || !priv) {
 			ret = -EPERM;
 			break;
 		}
 
-		ep = kdbus_cmd_ep_make(file_ep->bus, buf);
+		ep = kdbus_cmd_ep_make(bus, buf);
 		if (IS_ERR_OR_NULL(ep)) {
 			ret = PTR_ERR_OR_ZERO(ep);
 			break;
@@ -429,6 +416,7 @@ static long kdbus_handle_ioctl_ep(struct file *file, unsigned int cmd,
 		handle->ep_owner = ep;
 		ret = KDBUS_HANDLE_EP_OWNER;
 		break;
+	}
 
 	case KDBUS_CMD_HELLO:
 		conn = kdbus_cmd_hello(file_ep, file, buf);
