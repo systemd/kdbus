@@ -44,6 +44,7 @@ struct kdbus_user;
  * @domain:		Domain of this bus
  * @creator:		Creator of the bus
  * @creator_meta:	Meta information about the bus creator
+ * @last_message_id:	Last used message id
  * @policy_db:		Policy database for this bus
  * @name_registry:	Name registry of this bus
  * @conn_rwlock:	Read/Write lock for all lists of child connections
@@ -67,6 +68,7 @@ struct kdbus_bus {
 	struct kdbus_meta_proc *creator_meta;
 
 	/* protected by own locks */
+	atomic64_t last_message_id;
 	struct kdbus_policy_db policy_db;
 	struct kdbus_name_registry *name_registry;
 

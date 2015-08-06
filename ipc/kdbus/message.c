@@ -671,7 +671,7 @@ static struct kdbus_staging *kdbus_staging_new(struct kdbus_bus *bus,
 	if (!staging)
 		return ERR_PTR(-ENOMEM);
 
-	staging->msg_seqnum = atomic64_inc_return(&bus->domain->last_id);
+	staging->msg_seqnum = atomic64_inc_return(&bus->last_message_id);
 	staging->n_parts = 0; /* we reserve n_parts, but don't enforce them */
 	staging->parts = (void *)(staging + 1);
 
