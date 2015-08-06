@@ -73,7 +73,8 @@ struct kdbus_staging;
  * @activator_of:	Well-known name entry this connection acts as an
  * @names_list:		List of well-known names
  * @names_queue_list:	Well-known names this connection waits for
- * @privileged:		Whether this connection is privileged on the bus
+ * @privileged:		Whether this connection is privileged on the domain
+ * @owner:		Owned by the same user as the bus owner
  */
 struct kdbus_conn {
 	struct kref kref;
@@ -116,6 +117,7 @@ struct kdbus_conn {
 	struct list_head names_queue_list;
 
 	bool privileged:1;
+	bool owner:1;
 };
 
 struct kdbus_conn *kdbus_conn_ref(struct kdbus_conn *conn);
@@ -154,7 +156,7 @@ bool kdbus_conn_policy_see_notification(struct kdbus_conn *conn,
 					const struct kdbus_msg *msg);
 
 /* command dispatcher */
-struct kdbus_conn *kdbus_cmd_hello(struct kdbus_ep *ep, bool privileged,
+struct kdbus_conn *kdbus_cmd_hello(struct kdbus_ep *ep, struct file *file,
 				   void __user *argp);
 int kdbus_cmd_byebye_unlocked(struct kdbus_conn *conn, void __user *argp);
 int kdbus_cmd_conn_info(struct kdbus_conn *conn, void __user *argp);

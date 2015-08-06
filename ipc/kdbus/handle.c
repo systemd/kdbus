@@ -431,7 +431,7 @@ static long kdbus_handle_ioctl_ep(struct file *file, unsigned int cmd,
 		break;
 
 	case KDBUS_CMD_HELLO:
-		conn = kdbus_cmd_hello(file_ep, handle->privileged, buf);
+		conn = kdbus_cmd_hello(file_ep, file, buf);
 		if (IS_ERR_OR_NULL(conn)) {
 			ret = PTR_ERR_OR_ZERO(conn);
 			break;
