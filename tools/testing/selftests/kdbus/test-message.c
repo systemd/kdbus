@@ -293,7 +293,7 @@ static int kdbus_test_activator_quota(struct kdbus_test_env *env)
 	struct kdbus_conn *sender;
 	struct kdbus_conn *activator;
 	struct kdbus_msg *msg;
-	uint64_t flags = KDBUS_NAME_REPLACE_EXISTING;
+	uint64_t flags;
 	struct kdbus_cmd_recv recv = { .size = sizeof(recv) };
 	struct kdbus_policy_access access = {
 		.type = KDBUS_POLICY_ACCESS_USER,
@@ -375,6 +375,7 @@ static int kdbus_test_activator_quota(struct kdbus_test_env *env)
 	kdbus_msg_free(msg);
 
 	/* Try to acquire the name now */
+	flags = KDBUS_NAME_REPLACE_EXISTING;
 	ret = kdbus_name_acquire(conn, "foo.test.activator", &flags);
 	ASSERT_RETURN(ret == 0);
 
@@ -431,6 +432,7 @@ static int kdbus_test_activator_quota(struct kdbus_test_env *env)
 	ASSERT_RETURN(ret == -ENOBUFS);
 
 	/* Acquire the name again */
+	flags = KDBUS_NAME_REPLACE_EXISTING;
 	ret = kdbus_name_acquire(conn, "foo.test.activator", &flags);
 	ASSERT_RETURN(ret == 0);
 

@@ -47,7 +47,7 @@ static int kdbus_priv_activator(struct kdbus_test_env *env)
 	int ret;
 	struct kdbus_msg *msg = NULL;
 	uint64_t cookie = 0xdeadbeef;
-	uint64_t flags = KDBUS_NAME_REPLACE_EXISTING;
+	uint64_t flags;
 	struct kdbus_conn *activator;
 	struct kdbus_conn *service;
 	struct kdbus_conn *client;
@@ -119,12 +119,14 @@ static int kdbus_priv_activator(struct kdbus_test_env *env)
 	/* Policies are still checked, access denied */
 
 	ret = RUN_UNPRIVILEGED_CONN(unpriv, env->buspath, ({
+		flags = KDBUS_NAME_REPLACE_EXISTING;
 		ret = kdbus_name_acquire(unpriv, "foo.priv.activator",
 					 &flags);
 		ASSERT_RETURN(ret == -EPERM);
 	}));
 	ASSERT_RETURN(ret >= 0);
 
+	flags = KDBUS_NAME_REPLACE_EXISTING;
 	ret = kdbus_name_acquire(service, "foo.priv.activator",
 				 &flags);
 	ASSERT_RETURN(ret == 0);
@@ -216,6 +218,7 @@ static int kdbus_priv_activator(struct kdbus_test_env *env)
 	ASSERT_RETURN(ret == 0);
 
 	ret = RUN_UNPRIVILEGED_CONN(unpriv, env->buspath, ({
+		flags = KDBUS_NAME_REPLACE_EXISTING;
 		ret = kdbus_name_acquire(unpriv, "foo.priv.activator",
 					 &flags);
 		ASSERT_RETURN(ret == -EPERM);
