@@ -41,8 +41,10 @@ int kdbus_test_chat(struct kdbus_test_env *env)
 	ret = kdbus_name_acquire(conn_a, "foo.bar.double", NULL);
 	ASSERT_RETURN(ret == 0);
 
-	ret = kdbus_name_acquire(conn_a, "foo.bar.double", NULL);
-	ASSERT_RETURN(ret == -EALREADY);
+	flags = 0;
+	ret = kdbus_name_acquire(conn_a, "foo.bar.double", &flags);
+	ASSERT_RETURN(ret == 0);
+	ASSERT_RETURN(!(flags & KDBUS_NAME_ACQUIRED));
 
 	ret = kdbus_name_release(conn_a, "foo.bar.double");
 	ASSERT_RETURN(ret == 0);

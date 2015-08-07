@@ -143,10 +143,6 @@ int kdbus_test_name_conflict(struct kdbus_test_env *env)
 	ret = conn_is_name_owner(env->conn, name);
 	ASSERT_RETURN(ret == 0);
 
-	/* check that we can't acquire it again from the 1st connection */
-	ret = kdbus_name_acquire(env->conn, name, NULL);
-	ASSERT_RETURN(ret == -EALREADY);
-
 	/* check that we also can't acquire it again from the 2nd connection */
 	ret = kdbus_name_acquire(conn, name, NULL);
 	ASSERT_RETURN(ret == -EEXIST);

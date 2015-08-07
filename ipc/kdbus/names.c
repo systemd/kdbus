@@ -291,11 +291,9 @@ static int kdbus_name_update(struct kdbus_name_owner *owner, u64 flags,
 		/*
 		 * Already the primary owner of the name, flags were already
 		 * updated. Nothing to do.
-		 * For compatibility, we have to return -EALREADY.
 		 */
 
 		owner->flags |= KDBUS_NAME_PRIMARY;
-		ret = -EALREADY;
 
 	} else if ((primary->flags & KDBUS_NAME_ALLOW_REPLACEMENT) &&
 		   (flags & KDBUS_NAME_REPLACE_EXISTING)) {
@@ -344,7 +342,6 @@ static int kdbus_name_update(struct kdbus_name_owner *owner, u64 flags,
 		 */
 
 		list_del_init(&owner->name_entry);
-		ret = -EEXIST;
 	} else {
 		/*
 		 * Name is already claimed and queueing is not requested.
