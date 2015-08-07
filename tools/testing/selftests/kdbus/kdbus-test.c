@@ -118,6 +118,12 @@ static const struct kdbus_test tests[] = {
 		.flags	= TEST_CREATE_BUS | TEST_CREATE_CONN,
 	},
 	{
+		.name	= "name-takeover",
+		.desc	= "takeover of names",
+		.func	= kdbus_test_name_takeover,
+		.flags	= TEST_CREATE_BUS | TEST_CREATE_CONN,
+	},
+	{
 		.name	= "message-basic",
 		.desc	= "basic message handling",
 		.func	= kdbus_test_message_basic,

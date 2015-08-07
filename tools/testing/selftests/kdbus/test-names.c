@@ -17,44 +17,68 @@
 #include "kdbus-enum.h"
 #include "kdbus-test.h"
 
-static int conn_is_name_owner(const struct kdbus_conn *conn,
-			      const char *needle)
+struct test_name {
+	const char *name;
+	__u64 owner_id;
+	__u64 flags;
+};
+
+static bool conn_test_names(const struct kdbus_conn *conn,
+			    const struct test_name *tests,
+			    unsigned int n_tests)
 {
-	struct kdbus_cmd_list cmd_list = { .size = sizeof(cmd_list) };
+	struct kdbus_cmd_list cmd_list = {};
 	struct kdbus_info *name, *list;
-	bool found = false;
+	unsigned int i;
 	int ret;
 
-	cmd_list.flags = KDBUS_LIST_NAMES;
+	cmd_list.size = sizeof(cmd_list);
+	cmd_list.flags = KDBUS_LIST_NAMES |
+			 KDBUS_LIST_ACTIVATORS |
+			 KDBUS_LIST_QUEUED;
 
 	ret = kdbus_cmd_list(conn->fd, &cmd_list);
 	ASSERT_RETURN(ret == 0);
 
 	list = (struct kdbus_info *)(conn->buf + cmd_list.offset);
-	KDBUS_FOREACH(name, list, cmd_list.list_size) {
-		struct kdbus_item *item;
-		const char *n = NULL;
 
-		KDBUS_ITEM_FOREACH(item, name, items) {
-			if (item->type == KDBUS_ITEM_OWNED_NAME) {
-				n = item->name.name;
+	for (i = 0; i < n_tests; i++) {
+		const struct test_name *t = tests + i;
+		bool found = false;
 
-				if (name->id == conn->id &&
-				    n && strcmp(needle, n) == 0) {
+		KDBUS_FOREACH(name, list, cmd_list.list_size) {
+			struct kdbus_item *item;
+
+			KDBUS_ITEM_FOREACH(item, name, items) {
+				if (item->type != KDBUS_ITEM_OWNED_NAME ||
+				    strcmp(item->name.name, t->name) != 0)
+					continue;
+
+				if (t->owner_id == name->id &&
+				    t->flags == item->name.flags) {
 					found = true;
 					break;
 				}
 			}
 		}
 
-		if (found)
-			break;
+		if (!found)
+			return false;
 	}
 
-	ret = kdbus_free(conn, cmd_list.offset);
-	ASSERT_RETURN(ret == 0);
+	return true;
+}
 
-	return found ? 0 : -1;
+static bool conn_is_name_primary_owner(const struct kdbus_conn *conn,
+				       const char *needle)
+{
+	struct test_name t = {
+		.name = needle,
+		.owner_id = conn->id,
+		.flags = KDBUS_NAME_PRIMARY,
+	};
+
+	return conn_test_names(conn, &t, 1);
 }
 
 int kdbus_test_name_basic(struct kdbus_test_env *env)
@@ -90,15 +114,15 @@ int kdbus_test_name_basic(struct kdbus_test_env *env)
 	ret = kdbus_name_acquire(env->conn, name, NULL);
 	ASSERT_RETURN(ret == 0);
 
-	ret = conn_is_name_owner(env->conn, name);
-	ASSERT_RETURN(ret == 0);
+	ret = conn_is_name_primary_owner(env->conn, name);
+	ASSERT_RETURN(ret == true);
 
 	/* ... and release it again */
 	ret = kdbus_name_release(env->conn, name);
 	ASSERT_RETURN(ret == 0);
 
-	ret = conn_is_name_owner(env->conn, name);
-	ASSERT_RETURN(ret != 0);
+	ret = conn_is_name_primary_owner(env->conn, name);
+	ASSERT_RETURN(ret == false);
 
 	/* check that we can't release it again */
 	ret = kdbus_name_release(env->conn, name);
@@ -140,8 +164,8 @@ int kdbus_test_name_conflict(struct kdbus_test_env *env)
 	ret = kdbus_name_acquire(env->conn, name, NULL);
 	ASSERT_RETURN(ret == 0);
 
-	ret = conn_is_name_owner(env->conn, name);
-	ASSERT_RETURN(ret == 0);
+	ret = conn_is_name_primary_owner(env->conn, name);
+	ASSERT_RETURN(ret == true);
 
 	/* check that we also can't acquire it again from the 2nd connection */
 	ret = kdbus_name_acquire(conn, name, NULL);
@@ -155,6 +179,62 @@ int kdbus_test_name_conflict(struct kdbus_test_env *env)
 int kdbus_test_name_queue(struct kdbus_test_env *env)
 {
 	struct kdbus_conn *conn;
+	struct test_name t[2];
+	const char *name;
+	uint64_t flags;
+	int ret;
+
+	name = "foo.bla.blaz";
+
+	flags = 0;
+
+	/* create a 2nd connection */
+	conn = kdbus_hello(env->buspath, 0, NULL, 0);
+	ASSERT_RETURN(conn != NULL);
+
+	/* allow the new connection to own the same name */
+	/* acquire name from the 1st connection */
+	ret = kdbus_name_acquire(env->conn, name, &flags);
+	ASSERT_RETURN(ret == 0);
+
+	ret = conn_is_name_primary_owner(env->conn, name);
+	ASSERT_RETURN(ret == true);
+
+	/* queue the 2nd connection as waiting owner */
+	flags = KDBUS_NAME_QUEUE;
+	ret = kdbus_name_acquire(conn, name, &flags);
+	ASSERT_RETURN(ret == 0);
+	ASSERT_RETURN(flags & KDBUS_NAME_IN_QUEUE);
+
+	t[0].name = name;
+	t[0].owner_id = env->conn->id;
+	t[0].flags = KDBUS_NAME_PRIMARY;
+	t[1].name = name;
+	t[1].owner_id = conn->id;
+	t[1].flags = KDBUS_NAME_QUEUE | KDBUS_NAME_IN_QUEUE;
+	ret = conn_test_names(conn, t, 2);
+	ASSERT_RETURN(ret == true);
+
+	/* release name from 1st connection */
+	ret = kdbus_name_release(env->conn, name);
+	ASSERT_RETURN(ret == 0);
+
+	/* now the name should be owned by the 2nd connection */
+	t[0].name = name;
+	t[0].owner_id = conn->id;
+	t[0].flags = KDBUS_NAME_PRIMARY | KDBUS_NAME_QUEUE;
+	ret = conn_test_names(conn, t, 1);
+	ASSERT_RETURN(ret == true);
+
+	kdbus_conn_free(conn);
+
+	return TEST_OK;
+}
+
+int kdbus_test_name_takeover(struct kdbus_test_env *env)
+{
+	struct kdbus_conn *conn;
+	struct test_name t;
 	const char *name;
 	uint64_t flags;
 	int ret;
@@ -167,27 +247,24 @@ int kdbus_test_name_queue(struct kdbus_test_env *env)
 	conn = kdbus_hello(env->buspath, 0, NULL, 0);
 	ASSERT_RETURN(conn != NULL);
 
-	/* allow the new connection to own the same name */
-	/* acquire name from the 1st connection */
+	/* acquire name for 1st connection */
 	ret = kdbus_name_acquire(env->conn, name, &flags);
 	ASSERT_RETURN(ret == 0);
 
-	ret = conn_is_name_owner(env->conn, name);
-	ASSERT_RETURN(ret == 0);
+	t.name = name;
+	t.owner_id = env->conn->id;
+	t.flags = KDBUS_NAME_ALLOW_REPLACEMENT | KDBUS_NAME_PRIMARY;
+	ret = conn_test_names(conn, &t, 1);
+	ASSERT_RETURN(ret == true);
 
-	/* queue the 2nd connection as waiting owner */
-	flags = KDBUS_NAME_QUEUE;
+	/* now steal name with 2nd connection */
+	flags = KDBUS_NAME_REPLACE_EXISTING;
 	ret = kdbus_name_acquire(conn, name, &flags);
 	ASSERT_RETURN(ret == 0);
-	ASSERT_RETURN(flags & KDBUS_NAME_IN_QUEUE);
+	ASSERT_RETURN(flags & KDBUS_NAME_ACQUIRED);
 
-	/* release name from 1st connection */
-	ret = kdbus_name_release(env->conn, name);
-	ASSERT_RETURN(ret == 0);
-
-	/* now the name should be owned by the 2nd connection */
-	ret = conn_is_name_owner(conn, name);
-	ASSERT_RETURN(ret == 0);
+	ret = conn_is_name_primary_owner(conn, name);
+	ASSERT_RETURN(ret == true);
 
 	kdbus_conn_free(conn);
 

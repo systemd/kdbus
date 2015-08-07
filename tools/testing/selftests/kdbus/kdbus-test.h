@@ -72,6 +72,7 @@ int kdbus_test_monitor(struct kdbus_test_env *env);
 int kdbus_test_name_basic(struct kdbus_test_env *env);
 int kdbus_test_name_conflict(struct kdbus_test_env *env);
 int kdbus_test_name_queue(struct kdbus_test_env *env);
+int kdbus_test_name_takeover(struct kdbus_test_env *env);
 int kdbus_test_policy(struct kdbus_test_env *env);
 int kdbus_test_policy_ns(struct kdbus_test_env *env);
 int kdbus_test_policy_priv(struct kdbus_test_env *env);
