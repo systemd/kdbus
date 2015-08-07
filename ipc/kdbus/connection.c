@@ -129,9 +129,7 @@ static struct kdbus_conn *kdbus_conn_new(struct kdbus_ep *ep,
 #endif
 	mutex_init(&conn->lock);
 	INIT_LIST_HEAD(&conn->names_list);
-	INIT_LIST_HEAD(&conn->names_queue_list);
 	INIT_LIST_HEAD(&conn->reply_list);
-	atomic_set(&conn->name_count, 0);
 	atomic_set(&conn->request_count, 0);
 	atomic_set(&conn->lost_count, 0);
 	INIT_DELAYED_WORK(&conn->work, kdbus_reply_list_scan_work);
@@ -284,7 +282,6 @@ static void __kdbus_conn_free(struct kref *kref)
 	WARN_ON(delayed_work_pending(&conn->work));
 	WARN_ON(!list_empty(&conn->queue.msg_list));
 	WARN_ON(!list_empty(&conn->names_list));
-	WARN_ON(!list_empty(&conn->names_queue_list));
 	WARN_ON(!list_empty(&conn->reply_list));
 
 	if (conn->user) {
@@ -618,12 +615,13 @@ int kdbus_conn_disconnect(struct kdbus_conn *conn, bool ensure_queue_empty)
  */
 bool kdbus_conn_has_name(struct kdbus_conn *conn, const char *name)
 {
-	struct kdbus_name_entry *e;
+	struct kdbus_name_owner *owner;
 
 	lockdep_assert_held(&conn->ep->bus->name_registry->rwlock);
 
-	list_for_each_entry(e, &conn->names_list, conn_entry)
-		if (strcmp(e->name, name) == 0)
+	list_for_each_entry(owner, &conn->names_list, conn_entry)
+		if (!(owner->flags & KDBUS_NAME_IN_QUEUE) &&
+		    !strcmp(name, owner->name->name))
 			return true;
 
 	return false;
@@ -1052,6 +1050,7 @@ static int kdbus_pin_dst(struct kdbus_bus *bus,
 			 struct kdbus_conn **out_dst)
 {
 	const struct kdbus_msg *msg = staging->msg;
+	struct kdbus_name_owner *owner = NULL;
 	struct kdbus_name_entry *name = NULL;
 	struct kdbus_conn *dst = NULL;
 	int ret;
@@ -1070,7 +1069,9 @@ static int kdbus_pin_dst(struct kdbus_bus *bus,
 	} else {
 		name = kdbus_name_lookup_unlocked(bus->name_registry,
 						  staging->dst_name);
-		if (!name)
+		if (name)
+			owner = kdbus_name_get_owner(name);
+		if (!owner)
 			return -ESRCH;
 
 		/*
@@ -1082,19 +1083,14 @@ static int kdbus_pin_dst(struct kdbus_bus *bus,
 		 * owns the given name.
 		 */
 		if (msg->dst_id != KDBUS_DST_ID_NAME &&
-		    msg->dst_id != name->conn->id)
+		    msg->dst_id != owner->conn->id)
 			return -EREMCHG;
 
-		if (!name->conn && name->activator)
-			dst = kdbus_conn_ref(name->activator);
-		else
-			dst = kdbus_conn_ref(name->conn);
-
 		if ((msg->flags & KDBUS_MSG_NO_AUTO_START) &&
-		    kdbus_conn_is_activator(dst)) {
-			ret = -EADDRNOTAVAIL;
-			goto error;
-		}
+		    kdbus_conn_is_activator(owner->conn))
+			return -EADDRNOTAVAIL;
+
+		dst = kdbus_conn_ref(owner->conn);
 	}
 
 	*out_name = name;
@@ -1383,7 +1379,7 @@ static bool kdbus_conn_policy_query_all(struct kdbus_conn *conn,
 					struct kdbus_conn *whom,
 					unsigned int access)
 {
-	struct kdbus_name_entry *ne;
+	struct kdbus_name_owner *owner;
 	bool pass = false;
 	int res;
 
@@ -1392,10 +1388,14 @@ static bool kdbus_conn_policy_query_all(struct kdbus_conn *conn,
 	down_read(&db->entries_rwlock);
 	mutex_lock(&whom->lock);
 
-	list_for_each_entry(ne, &whom->names_list, conn_entry) {
-		res = kdbus_policy_query_unlocked(db, conn_creds ? : conn->cred,
-						  ne->name,
-						  kdbus_strhash(ne->name));
+	list_for_each_entry(owner, &whom->names_list, conn_entry) {
+		if (owner->flags & KDBUS_NAME_IN_QUEUE)
+			continue;
+
+		res = kdbus_policy_query_unlocked(db,
+					conn_creds ? : conn->cred,
+					owner->name->name,
+					kdbus_strhash(owner->name->name));
 		if (res >= (int)access) {
 			pass = true;
 			break;
@@ -1713,6 +1713,7 @@ int kdbus_cmd_conn_info(struct kdbus_conn *conn, void __user *argp)
 	struct kdbus_meta_conn *conn_meta = NULL;
 	struct kdbus_pool_slice *slice = NULL;
 	struct kdbus_name_entry *entry = NULL;
+	struct kdbus_name_owner *owner = NULL;
 	struct kdbus_conn *owner_conn = NULL;
 	struct kdbus_item *meta_items = NULL;
 	struct kdbus_info info = {};
@@ -1749,15 +1750,17 @@ int kdbus_cmd_conn_info(struct kdbus_conn *conn, void __user *argp)
 
 	if (name) {
 		entry = kdbus_name_lookup_unlocked(bus->name_registry, name);
-		if (!entry || !entry->conn ||
+		if (entry)
+			owner = kdbus_name_get_owner(entry);
+		if (!owner ||
 		    !kdbus_conn_policy_see_name(conn, current_cred(), name) ||
-		    (cmd->id != 0 && entry->conn->id != cmd->id)) {
+		    (cmd->id != 0 && owner->conn->id != cmd->id)) {
 			/* pretend a name doesn't exist if you cannot see it */
 			ret = -ESRCH;
 			goto exit;
 		}
 
-		owner_conn = kdbus_conn_ref(entry->conn);
+		owner_conn = kdbus_conn_ref(owner->conn);
 	} else if (cmd->id > 0) {
 		owner_conn = kdbus_bus_find_conn_by_id(bus, cmd->id);
 		if (!owner_conn || !kdbus_conn_policy_see(conn, current_cred(),

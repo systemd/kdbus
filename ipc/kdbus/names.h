@@ -18,6 +18,10 @@
 #include <linux/hashtable.h>
 #include <linux/rwsem.h>
 
+struct kdbus_name_entry;
+struct kdbus_name_owner;
+struct kdbus_name_registry;
+
 /**
  * struct kdbus_name_registry - names registered for a bus
  * @entries_hash:	Map of entries
@@ -32,25 +36,35 @@ struct kdbus_name_registry {
 
 /**
  * struct kdbus_name_entry - well-know name entry
- * @name_id:		Sequence number of name entry to be able to uniquely
+ * @name_id:		sequence number of name entry to be able to uniquely
  *			identify a name over its registration lifetime
- * @flags:		KDBUS_NAME_* flags
- * @conn:		Connection owning the name
- * @activator:		Connection of the activator queuing incoming messages
- * @queue:		List of queued connections
- * @conn_entry:		Entry in connection
- * @hentry:		Entry in registry map
- * @name:		The well-known name
+ * @activator:		activator of this name, or NULL
+ * @queue:		list of queued owners
+ * @hentry:		entry in registry map
+ * @name:		well-known name
  */
 struct kdbus_name_entry {
 	u64 name_id;
-	u64 flags;
-	struct kdbus_conn *conn;
-	struct kdbus_conn *activator;
+	struct kdbus_name_owner *activator;
 	struct list_head queue;
-	struct list_head conn_entry;
 	struct hlist_node hentry;
 	char name[];
+};
+
+/**
+ * struct kdbus_name_owner - owner of a well-known name
+ * @flags:		KDBUS_NAME_* flags of this owner
+ * @conn:		connection owning the name
+ * @name:		name that is owned
+ * @conn_entry:		link into @conn
+ * @name_entry:		link into @name
+ */
+struct kdbus_name_owner {
+	u64 flags;
+	struct kdbus_conn *conn;
+	struct kdbus_name_entry *name;
+	struct list_head conn_entry;
+	struct list_head name_entry;
 };
 
 bool kdbus_name_is_valid(const char *p, bool allow_wildcard);
@@ -70,5 +84,22 @@ void kdbus_name_release_all(struct kdbus_name_registry *reg,
 int kdbus_cmd_name_acquire(struct kdbus_conn *conn, void __user *argp);
 int kdbus_cmd_name_release(struct kdbus_conn *conn, void __user *argp);
 int kdbus_cmd_list(struct kdbus_conn *conn, void __user *argp);
+
+/**
+ * kdbus_name_get_owner() - get current owner of a name
+ * @name:	name to get current owner of
+ *
+ * This returns a pointer to the current owner of a name (or its activator if
+ * there is no owner). The caller must make sure @name is valid and does not
+ * vanish.
+ *
+ * Return: Pointer to current owner or NULL if there is none.
+ */
+static inline struct kdbus_name_owner *
+kdbus_name_get_owner(struct kdbus_name_entry *name)
+{
+	return list_first_entry_or_null(&name->queue, struct kdbus_name_owner,
+					name_entry) ? : name->activator;
+}
 
 #endif

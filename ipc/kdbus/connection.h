@@ -30,6 +30,7 @@
 					 KDBUS_HELLO_POLICY_HOLDER | \
 					 KDBUS_HELLO_MONITOR)
 
+struct kdbus_name_entry;
 struct kdbus_quota;
 struct kdbus_staging;
 
@@ -61,7 +62,6 @@ struct kdbus_staging;
  * @cred:		The credentials of the connection at creation time
  * @pid:		Pid at creation time
  * @root_path:		Root path at creation time
- * @name_count:		Number of owned well-known names
  * @request_count:	Number of pending requests issued by this
  *			connection that are waiting for replies from
  *			other peers
@@ -70,9 +70,8 @@ struct kdbus_staging;
  * @queue:		The message queue associated with this connection
  * @quota:		Array of per-user quota indexed by user->id
  * @n_quota:		Number of elements in quota array
- * @activator_of:	Well-known name entry this connection acts as an
  * @names_list:		List of well-known names
- * @names_queue_list:	Well-known names this connection waits for
+ * @name_count:		Number of owned well-known names
  * @privileged:		Whether this connection is privileged on the domain
  * @owner:		Owned by the same user as the bus owner
  */
@@ -102,7 +101,6 @@ struct kdbus_conn {
 	const struct cred *cred;
 	struct pid *pid;
 	struct path root_path;
-	atomic_t name_count;
 	atomic_t request_count;
 	atomic_t lost_count;
 	wait_queue_head_t wait;
@@ -112,9 +110,8 @@ struct kdbus_conn {
 	unsigned int n_quota;
 
 	/* protected by registry->rwlock */
-	struct kdbus_name_entry *activator_of;
 	struct list_head names_list;
-	struct list_head names_queue_list;
+	unsigned int name_count;
 
 	bool privileged:1;
 	bool owner:1;

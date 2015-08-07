@@ -603,7 +603,7 @@ static void kdbus_meta_conn_collect_timestamp(struct kdbus_meta_conn *mc,
 static int kdbus_meta_conn_collect_names(struct kdbus_meta_conn *mc,
 					 struct kdbus_conn *conn)
 {
-	const struct kdbus_name_entry *e;
+	const struct kdbus_name_owner *owner;
 	struct kdbus_item *item;
 	size_t slen, size;
 
@@ -611,9 +611,11 @@ static int kdbus_meta_conn_collect_names(struct kdbus_meta_conn *mc,
 
 	size = 0;
 	/* open-code length calculation to avoid final padding */
-	list_for_each_entry(e, &conn->names_list, conn_entry)
-		size = KDBUS_ALIGN8(size) + KDBUS_ITEM_HEADER_SIZE +
-			sizeof(struct kdbus_name) + strlen(e->name) + 1;
+	list_for_each_entry(owner, &conn->names_list, conn_entry)
+		if (!(owner->flags & KDBUS_NAME_IN_QUEUE))
+			size = KDBUS_ALIGN8(size) + KDBUS_ITEM_HEADER_SIZE +
+				sizeof(struct kdbus_name) +
+				strlen(owner->name->name) + 1;
 
 	if (!size)
 		return 0;
@@ -626,12 +628,15 @@ static int kdbus_meta_conn_collect_names(struct kdbus_meta_conn *mc,
 	mc->owned_names_items = item;
 	mc->owned_names_size = size;
 
-	list_for_each_entry(e, &conn->names_list, conn_entry) {
-		slen = strlen(e->name) + 1;
+	list_for_each_entry(owner, &conn->names_list, conn_entry) {
+		if (owner->flags & KDBUS_NAME_IN_QUEUE)
+			continue;
+
+		slen = strlen(owner->name->name) + 1;
 		kdbus_item_set(item, KDBUS_ITEM_OWNED_NAME, NULL,
 			       sizeof(struct kdbus_name) + slen);
-		item->name.flags = e->flags;
-		memcpy(item->name.name, e->name, slen);
+		item->name.flags = owner->flags;
+		memcpy(item->name.name, owner->name->name, slen);
 		item = KDBUS_ITEM_NEXT(item);
 	}
 
