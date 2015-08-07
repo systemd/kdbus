@@ -854,6 +854,8 @@ enum kdbus_make_flags {
  * @KDBUS_NAME_QUEUE:			Name should be queued if busy
  * @KDBUS_NAME_IN_QUEUE:		Name is queued
  * @KDBUS_NAME_ACTIVATOR:		Name is owned by a activator connection
+ * @KDBUS_NAME_PRIMARY:			Primary owner of the name
+ * @KDBUS_NAME_ACQUIRED:		Name was acquired/queued _now_
  */
 enum kdbus_name_flags {
 	KDBUS_NAME_REPLACE_EXISTING	= 1ULL <<  0,
@@ -861,6 +863,8 @@ enum kdbus_name_flags {
 	KDBUS_NAME_QUEUE		= 1ULL <<  2,
 	KDBUS_NAME_IN_QUEUE		= 1ULL <<  3,
 	KDBUS_NAME_ACTIVATOR		= 1ULL <<  4,
+	KDBUS_NAME_PRIMARY		= 1ULL <<  5,
+	KDBUS_NAME_ACQUIRED		= 1ULL <<  6,
 };
 
 /**

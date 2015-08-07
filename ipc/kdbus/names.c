@@ -211,7 +211,8 @@ kdbus_name_lookup_unlocked(struct kdbus_name_registry *reg, const char *name)
 	return kdbus_name_entry_find(reg, kdbus_strhash(name), name);
 }
 
-static int kdbus_name_become_activator(struct kdbus_name_owner *owner)
+static int kdbus_name_become_activator(struct kdbus_name_owner *owner,
+				       u64 *return_flags)
 {
 	if (kdbus_name_owner_is_used(owner))
 		return -EALREADY;
@@ -221,23 +222,30 @@ static int kdbus_name_become_activator(struct kdbus_name_owner *owner)
 	owner->name->activator = owner;
 	owner->flags |= KDBUS_NAME_ACTIVATOR;
 
-	if (kdbus_name_entry_first(owner->name))
+	if (kdbus_name_entry_first(owner->name)) {
 		owner->flags |= KDBUS_NAME_IN_QUEUE;
-	else
+	} else {
+		owner->flags |= KDBUS_NAME_PRIMARY;
 		kdbus_notify_name_change(owner->conn->ep->bus,
 					 KDBUS_ITEM_NAME_ADD,
 					 0, owner->conn->id,
 					 0, owner->flags,
 					 owner->name->name);
+	}
+
+	if (return_flags)
+		*return_flags = owner->flags | KDBUS_NAME_ACQUIRED;
 
 	return 0;
 }
 
-static int kdbus_name_update(struct kdbus_name_owner *owner, u64 flags)
+static int kdbus_name_update(struct kdbus_name_owner *owner, u64 flags,
+			     u64 *return_flags)
 {
 	struct kdbus_name_owner *primary, *activator;
 	struct kdbus_name_entry *name;
 	struct kdbus_bus *bus;
+	u64 nflags = 0;
 	int ret = 0;
 
 	name = owner->name;
@@ -259,6 +267,8 @@ static int kdbus_name_update(struct kdbus_name_owner *owner, u64 flags)
 		 */
 
 		list_add(&owner->name_entry, &name->queue);
+		owner->flags |= KDBUS_NAME_PRIMARY;
+		nflags |= KDBUS_NAME_ACQUIRED;
 
 		/* move messages to new owner on activation */
 		if (activator) {
@@ -268,6 +278,7 @@ static int kdbus_name_update(struct kdbus_name_owner *owner, u64 flags)
 					activator->conn->id, owner->conn->id,
 					activator->flags, owner->flags,
 					name->name);
+			activator->flags &= ~KDBUS_NAME_PRIMARY;
 			activator->flags |= KDBUS_NAME_IN_QUEUE;
 		} else {
 			kdbus_notify_name_change(bus, KDBUS_ITEM_NAME_ADD,
@@ -283,6 +294,7 @@ static int kdbus_name_update(struct kdbus_name_owner *owner, u64 flags)
 		 * For compatibility, we have to return -EALREADY.
 		 */
 
+		owner->flags |= KDBUS_NAME_PRIMARY;
 		ret = -EALREADY;
 
 	} else if ((primary->flags & KDBUS_NAME_ALLOW_REPLACEMENT) &&
@@ -295,6 +307,8 @@ static int kdbus_name_update(struct kdbus_name_owner *owner, u64 flags)
 
 		list_del_init(&owner->name_entry);
 		list_add(&owner->name_entry, &name->queue);
+		owner->flags |= KDBUS_NAME_PRIMARY;
+		nflags |= KDBUS_NAME_ACQUIRED;
 
 		kdbus_notify_name_change(bus, KDBUS_ITEM_NAME_CHANGE,
 					 primary->conn->id, owner->conn->id,
@@ -303,6 +317,7 @@ static int kdbus_name_update(struct kdbus_name_owner *owner, u64 flags)
 
 		/* requeue old primary, or drop if queueing not wanted */
 		if (primary->flags & KDBUS_NAME_QUEUE) {
+			primary->flags &= ~KDBUS_NAME_PRIMARY;
 			primary->flags |= KDBUS_NAME_IN_QUEUE;
 		} else {
 			list_del_init(&primary->name_entry);
@@ -317,8 +332,10 @@ static int kdbus_name_update(struct kdbus_name_owner *owner, u64 flags)
 		 */
 
 		owner->flags |= KDBUS_NAME_IN_QUEUE;
-		if (!kdbus_name_owner_is_used(owner))
+		if (!kdbus_name_owner_is_used(owner)) {
 			list_add_tail(&owner->name_entry, &name->queue);
+			nflags |= KDBUS_NAME_ACQUIRED;
+		}
 	} else if (kdbus_name_owner_is_used(owner)) {
 		/*
 		 * Already queued on name, but re-queueing was not requested.
@@ -336,6 +353,9 @@ static int kdbus_name_update(struct kdbus_name_owner *owner, u64 flags)
 
 		ret = -EEXIST;
 	}
+
+	if (return_flags)
+		*return_flags = owner->flags | nflags;
 
 	return ret;
 }
@@ -392,14 +412,11 @@ int kdbus_name_acquire(struct kdbus_name_registry *reg,
 	}
 
 	if (flags & KDBUS_NAME_ACTIVATOR)
-		ret = kdbus_name_become_activator(owner);
+		ret = kdbus_name_become_activator(owner, return_flags);
 	else
-		ret = kdbus_name_update(owner, flags);
+		ret = kdbus_name_update(owner, flags, return_flags);
 	if (ret < 0)
 		goto exit;
-
-	if (return_flags)
-		*return_flags = owner->flags;
 
 exit:
 	if (owner && !kdbus_name_owner_is_used(owner))
@@ -431,6 +448,7 @@ static void kdbus_name_release_unlocked(struct kdbus_name_owner *owner)
 		if (next) {
 			/* hand to next in queue */
 			next->flags &= ~KDBUS_NAME_IN_QUEUE;
+			next->flags |= KDBUS_NAME_PRIMARY;
 			if (next == name->activator)
 				kdbus_conn_move_messages(next->conn,
 							 owner->conn,
