@@ -75,16 +75,13 @@
  *  '» struct kdbus_ep *ep (owned)
  */
 
-/* kdbus mount-point /sys/fs/kdbus */
-static struct kobject *kdbus_dir;
-
 static int __init kdbus_init(void)
 {
 	int ret;
 
-	kdbus_dir = kobject_create_and_add(KBUILD_MODNAME, fs_kobj);
-	if (!kdbus_dir)
-		return -ENOMEM;
+	ret = sysfs_create_mount_point(fs_kobj, KBUILD_MODNAME);
+	if (ret)
+		return ret;
 
 	ret = kdbus_fs_init();
 	if (ret < 0) {
@@ -96,14 +93,14 @@ static int __init kdbus_init(void)
 	return 0;
 
 exit_dir:
-	kobject_put(kdbus_dir);
+	sysfs_remove_mount_point(fs_kobj, KBUILD_MODNAME);
 	return ret;
 }
 
 static void __exit kdbus_exit(void)
 {
 	kdbus_fs_exit();
-	kobject_put(kdbus_dir);
+	sysfs_remove_mount_point(fs_kobj, KBUILD_MODNAME);
 	ida_destroy(&kdbus_node_ida);
 }
 
