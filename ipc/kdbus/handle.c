@@ -310,13 +310,13 @@ static int kdbus_handle_release(struct inode *inode, struct file *file)
 	switch (handle->type) {
 	case KDBUS_HANDLE_BUS_OWNER:
 		if (handle->bus_owner) {
-			kdbus_node_deactivate(&handle->bus_owner->node);
+			kdbus_node_drain(&handle->bus_owner->node);
 			kdbus_bus_unref(handle->bus_owner);
 		}
 		break;
 	case KDBUS_HANDLE_EP_OWNER:
 		if (handle->ep_owner) {
-			kdbus_node_deactivate(&handle->ep_owner->node);
+			kdbus_node_drain(&handle->ep_owner->node);
 			kdbus_ep_unref(handle->ep_owner);
 		}
 		break;

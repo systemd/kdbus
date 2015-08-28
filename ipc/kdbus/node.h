@@ -32,6 +32,7 @@ typedef void (*kdbus_node_free_t) (struct kdbus_node *node);
 typedef void (*kdbus_node_release_t) (struct kdbus_node *node, bool was_active);
 
 struct kdbus_node {
+	struct mutex lock;
 	atomic_t refcnt;
 	atomic_t active;
 	wait_queue_head_t waitq;
@@ -49,10 +50,9 @@ struct kdbus_node {
 	unsigned int hash;
 	unsigned int id;
 	struct kdbus_node *parent; /* may be NULL */
-
-	/* valid iff active */
-	struct mutex lock;
 	struct rb_node rb;
+
+	/* dynamic list of children */
 	struct rb_root children;
 };
 
@@ -72,6 +72,7 @@ bool kdbus_node_is_active(struct kdbus_node *node);
 bool kdbus_node_is_deactivated(struct kdbus_node *node);
 bool kdbus_node_activate(struct kdbus_node *node);
 void kdbus_node_deactivate(struct kdbus_node *node);
+void kdbus_node_drain(struct kdbus_node *node);
 
 bool kdbus_node_acquire(struct kdbus_node *node);
 void kdbus_node_release(struct kdbus_node *node);

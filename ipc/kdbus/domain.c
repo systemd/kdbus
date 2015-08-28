@@ -60,7 +60,7 @@ static struct kdbus_node *kdbus_domain_control_new(struct kdbus_domain *domain,
 	return node;
 
 exit_free:
-	kdbus_node_deactivate(node);
+	kdbus_node_drain(node);
 	kdbus_node_unref(node);
 	return ERR_PTR(ret);
 }
@@ -114,7 +114,7 @@ struct kdbus_domain *kdbus_domain_new(unsigned int access)
 	return d;
 
 exit_unref:
-	kdbus_node_deactivate(&d->node);
+	kdbus_node_drain(&d->node);
 	kdbus_node_unref(&d->node);
 	return ERR_PTR(ret);
 }

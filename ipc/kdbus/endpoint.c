@@ -146,7 +146,7 @@ struct kdbus_ep *kdbus_ep_new(struct kdbus_bus *bus, const char *name,
 	return e;
 
 exit_unref:
-	kdbus_node_deactivate(&e->node);
+	kdbus_node_drain(&e->node);
 	kdbus_node_unref(&e->node);
 	return ERR_PTR(ret);
 }
@@ -262,7 +262,7 @@ exit:
 	ret = kdbus_args_clear(&args, ret);
 	if (ret < 0) {
 		if (ep) {
-			kdbus_node_deactivate(&ep->node);
+			kdbus_node_drain(&ep->node);
 			kdbus_ep_unref(ep);
 		}
 		return ERR_PTR(ret);
