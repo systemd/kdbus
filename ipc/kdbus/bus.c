@@ -167,7 +167,7 @@ static struct kdbus_bus *kdbus_bus_new(struct kdbus_domain *domain,
 	return b;
 
 exit_unref:
-	kdbus_node_deactivate(&b->node);
+	kdbus_node_drain(&b->node);
 	kdbus_node_unref(&b->node);
 	return ERR_PTR(ret);
 }
@@ -416,11 +416,11 @@ exit:
 	ret = kdbus_args_clear(&args, ret);
 	if (ret < 0) {
 		if (ep) {
-			kdbus_node_deactivate(&ep->node);
+			kdbus_node_drain(&ep->node);
 			kdbus_ep_unref(ep);
 		}
 		if (bus) {
-			kdbus_node_deactivate(&bus->node);
+			kdbus_node_drain(&bus->node);
 			kdbus_bus_unref(bus);
 		}
 		return ERR_PTR(ret);

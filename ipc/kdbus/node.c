@@ -111,33 +111,27 @@
  *
  * All nodes can be deactivated via kdbus_node_deactivate() at any time. You can
  * call this multiple times, even in parallel or on nodes that were never
- * linked, and it will just work. The only restriction is, you must not hold an
- * active reference when calling kdbus_node_deactivate().
- * By deactivating a node, it is immediately marked inactive. Then, we wait for
- * all active references to be released (called 'draining' the node). This
- * shouldn't take very long as we don't perform long-lasting operations while
- * holding an active reference. Note that once the node is marked inactive, no
- * new active references can be acquired.
- * Once all active references are dropped, the node is considered 'drained'. Now
- * kdbus_node_deactivate() is called on each child of the node before we
- * continue deactivating our node. That is, once all children are entirely
- * deactivated, we call ->release_cb() of our node. ->release_cb() can release
- * any resources on that node which are bound to the "active" state of a node.
- * When done, we unlink the node from its parent rb-tree, mark it as
- * 'released' and return.
- * If kdbus_node_deactivate() is called multiple times (even in parallel), all
- * but one caller will just wait until the node is fully deactivated. That is,
- * one random caller of kdbus_node_deactivate() is selected to call
- * ->release_cb() and cleanup the node. Only once all this is done, all other
- * callers will return from kdbus_node_deactivate(). That is, it doesn't matter
- * whether you're the selected caller or not, it will only return after
- * everything is fully done.
+ * linked, and it will just work. Furthermore, all children will be deactivated
+ * recursively as well. If a node is deactivated, there might still be active
+ * references that were acquired before calling kdbus_node_deactivate(). The
+ * owner of an object must call kdbus_node_drain() (which is a superset of
+ * kdbus_node_deactivate()) before dropping their reference. This will
+ * deactivate the node and also synchronously wait for all active references to
+ * be dropped. Hence, once kdbus_node_drain() returns, the node is fully
+ * released and no active references exist, anymore.
+ * kdbus_node_drain() can be called at any times, multiple times, and in
+ * parallel on multiple threads. All calls are synchronized internally and will
+ * return only once the node is fully drained. The only restriction is, you
+ * must not hold an active reference when calling kdbus_node_drain() (unlike
+ * deactivation, which allows the caller to hold an active reference).
  *
  * When a node is activated, we acquire a normal object reference to the node.
- * This reference is dropped after deactivation is fully done (and only iff the
+ * This reference is dropped after deactivation is fully done (and only if the
  * node really was activated). This allows callers to link+activate a child node
- * and then drop all refs. The node will be deactivated together with the
- * parent, and then be freed when this reference is dropped.
+ * and then drop all refs. This has the effect that nobody owns a reference to
+ * the node, except for the parent node. Hence, if the parent is deactivated
+ * (and thus all children are deactivated, too), this will automatically
+ * release the child node.
  *
  * Currently, nodes provide a bunch of resources that external code can use
  * directly. This includes:
@@ -198,11 +192,10 @@
  *                   is even unique if linked but not activated, yet. This might
  *                   change in the future, though. Code should not rely on this.
  *
- *     * node->lock:     lock to protect node->children, node->rb, node->parent
+ *     * node->lock:   lock to protect node->children, node->rb, node->parent
  *     * node->parent: Reference to parent node. This is set during LINK time
- *                     and is dropped during destruction. You must not access
- *                     it unless you hold an active reference to the node or if
- *                     you know the node is dead.
+ *                     and is dropped during destruction. You can freely access
+ *                     this field, but it may be NULL (root node).
  *     * node->children: rb-tree of all linked children of this node. You must
  *                       not access this directly, but use one of the iterator
  *                       or lookup helpers.
@@ -265,6 +258,18 @@ static unsigned int kdbus_node_name_hash(const char *name)
  * @name:	name to compare the node with
  * @node:	node to compare the name with
  *
+ * This compares a query string against a kdbus node. If the kdbus node has the
+ * given name, this returns 0. Otherwise, this returns >0 / <0 depending
+ * whether the query string is greater / less than the node.
+ *
+ * Note: If @node is drained but has the name @name, this returns 1. The
+ *       reason for this is that we treat drained nodes as "renamed". The
+ *       slot of such nodes is no longer occupied and new nodes can claim it.
+ *       Obviously, this has the side-effect that you cannot match drained
+ *       nodes, as they will never return 0 on name-matches. But this is
+ *       intentional, as there is no reason why anyone would ever want to match
+ *       on drained nodes.
+ *
  * Return: 0 if @name and @hash exactly match the information in @node, or
  * an integer less than or greater than zero if @name is found, respectively,
  * to be less than or be greater than the string stored in @node.
@@ -272,10 +277,16 @@ static unsigned int kdbus_node_name_hash(const char *name)
 static int kdbus_node_name_compare(unsigned int hash, const char *name,
 				   const struct kdbus_node *node)
 {
+	int ret;
+
 	if (hash != node->hash)
 		return hash - node->hash;
 
-	return strcmp(name, node->name);
+	ret = strcmp(name, node->name);
+	if (ret != 0)
+		return ret;
+
+	return atomic_read(&node->active) == KDBUS_NODE_DRAINED;
 }
 
 /**
@@ -312,7 +323,7 @@ void kdbus_node_init(struct kdbus_node *node, unsigned int type)
  * ID could be allocated. You must not activate a node if linking failed! It is
  * safe to deactivate it, though.
  *
- * Once you linked a node, you must call kdbus_node_deactivate() before you drop
+ * Once you linked a node, you must call kdbus_node_drain() before you drop
  * the last reference (even if you never activate the node).
  *
  * Return: 0 on success. negative error otherwise.
@@ -419,7 +430,7 @@ struct kdbus_node *kdbus_node_ref(struct kdbus_node *node)
  *
  * Note that this calls into ->free_cb() and thus _might_ sleep. The ->free_cb()
  * callbacks must not acquire any outer locks, though. So you can safely drop
- * references while holding locks.
+ * references while holding locks (apart from node->parent->lock).
  *
  * If @node is NULL, this is a no-op.
  *
@@ -431,7 +442,16 @@ struct kdbus_node *kdbus_node_unref(struct kdbus_node *node)
 		struct kdbus_node safe = *node;
 
 		WARN_ON(atomic_read(&node->active) != KDBUS_NODE_DRAINED);
-		WARN_ON(!RB_EMPTY_NODE(&node->rb));
+
+		if (node->parent) {
+			mutex_lock(&node->parent->lock);
+			if (!RB_EMPTY_NODE(&node->rb)) {
+				rb_erase(&node->rb,
+					 &node->parent->children);
+				RB_CLEAR_NODE(&node->rb);
+			}
+			mutex_unlock(&node->parent->lock);
+		}
 
 		if (node->free_cb)
 			node->free_cb(node);
@@ -439,12 +459,6 @@ struct kdbus_node *kdbus_node_unref(struct kdbus_node *node)
 			ida_simple_remove(&kdbus_node_ida, safe.id);
 
 		kfree(safe.name);
-
-		/*
-		 * kdbusfs relies on the parent to be available even after the
-		 * node was deactivated and unlinked. Therefore, we pin it
-		 * until a node is destroyed.
-		 */
 		kdbus_node_unref(safe.parent);
 	}
 
@@ -534,11 +548,125 @@ bool kdbus_node_activate(struct kdbus_node *node)
 }
 
 /**
- * kdbus_node_deactivate() - deactivate a node
- * @node:	The node to deactivate.
+ * kdbus_node_recurse_unlock() - advance iterator on a tree
+ * @start:	node at which the iteration started
+ * @node:	previously visited node
  *
- * This function recursively deactivates this node and all its children. It
- * returns only once all children and the node itself were recursively disabled
+ * This helper advances an iterator by one, when traversing a node tree. It is
+ * supposed to be used like this:
+ *
+ *     struct kdbus_node *n;
+ *
+ *     n = start;
+ *     while (n) {
+ *             mutex_lock(&n->lock);
+ *             ... visit @n ...
+ *             n = kdbus_node_recurse_unlock(start, n);
+ *     }
+ *
+ * This helpers takes as input the start-node of the iteration and the current
+ * position. It returns a pointer to the next node to visit. The caller must
+ * hold a reference to @start during the whole iteration. Furthermore, @node
+ * must be locked when entering this helper. On return, the lock is released.
+ *
+ * The order of visit is pre-order traversal.
+ *
+ * If @node is deactivated before recursing its children, then it is guaranteed
+ * that all children will be visited. If @node is still active, new nodes might
+ * be inserted during traversal, and thus might be missed.
+ *
+ * Also note that the node-locks are released while traversing children. You
+ * must not rely on the locks to be held during the whole traversal. Each node
+ * that is visited is pinned by this helper, so the caller can rely on owning a
+ * reference. It is dropped, once all of the children of the node have been
+ * visited (recursively).
+ *
+ * You *must not* bail out of a traversal early, otherwise you'll leak
+ * ref-counts to all nodes in the current depth-path.
+ *
+ * Return: Reference to next node, or NULL.
+ */
+static struct kdbus_node *kdbus_node_recurse_unlock(struct kdbus_node *start,
+						    struct kdbus_node *node)
+{
+	struct kdbus_node *t, *prev = NULL;
+	struct rb_node *rb;
+
+	lockdep_assert_held(&node->lock);
+
+	rb = rb_first(&node->children);
+	if (!rb) {
+		do {
+			mutex_unlock(&node->lock);
+			kdbus_node_unref(prev);
+
+			if (node == start)
+				return NULL;
+
+			prev = node;
+			node = node->parent;
+
+			mutex_lock(&node->lock);
+			rb = rb_next(&prev->rb);
+		} while (!rb);
+	}
+
+	t = kdbus_node_ref(kdbus_node_from_rb(rb));
+	mutex_unlock(&node->lock);
+	kdbus_node_unref(prev);
+	return t;
+}
+
+/**
+ * kdbus_node_deactivate() - deactivate a node
+ * @node:	node to deactivate
+ *
+ * This recursively deactivates the passed node and all its children. The nodes
+ * are marked as deactivated, but they're not drained. Hence, even after this
+ * call returns, there might still be someone holding an active reference to
+ * any of the nodes. However, no new active references can be acquired after
+ * this returns.
+ *
+ * It is safe to call this multiple times (even in parallel). Each call is
+ * guaranteed to only return after _all_ nodes have been deactivated.
+ */
+void kdbus_node_deactivate(struct kdbus_node *node)
+{
+	struct kdbus_node *pos;
+	int v;
+
+	pos = node;
+	while (pos) {
+		mutex_lock(&pos->lock);
+
+		/*
+		 * Add BIAS to pos->active to mark it as inactive. If it was
+		 * never active before, immediately mark it as RELEASE_INACTIVE
+		 * so that this case can be detected later on.
+		 * If the node was already deactivated, make sure to still
+		 * recurse into the children. Otherwise, we might return before
+		 * a racing thread finished deactivating all children. But we
+		 * want to guarantee that the whole tree is deactivated once
+		 * this returns.
+		 */
+		v = atomic_read(&pos->active);
+		if (v >= 0)
+			atomic_add_return(KDBUS_NODE_BIAS, &pos->active);
+		else if (v == KDBUS_NODE_NEW)
+			atomic_set(&pos->active, KDBUS_NODE_RELEASE_DIRECT);
+
+		pos = kdbus_node_recurse_unlock(node, pos);
+	}
+}
+
+/**
+ * kdbus_node_drain() - drain a node
+ * @node:	node to drain
+ *
+ * This function recursively deactivates this node and all its children and
+ * then waits for all active references to be dropped. This function is a
+ * superset of kdbus_node_deactivate(), as it additionally drains all nodes. It
+ * returns only once all children and the node itself were recursively drained
  * (even if you call this function multiple times in parallel).
  *
  * It is safe to call this function on _any_ node that was initialized _any_
@@ -546,66 +674,23 @@ bool kdbus_node_activate(struct kdbus_node *node)
  *
  * This call may sleep, as it waits for all active references to be dropped.
  */
-void kdbus_node_deactivate(struct kdbus_node *node)
+void kdbus_node_drain(struct kdbus_node *node)
 {
-	struct kdbus_node *pos, *child;
-	struct rb_node *rb;
-	int v_pre, v_post;
+	struct kdbus_node *pos;
+	int v;
+
+	kdbus_node_deactivate(node);
 
 	pos = node;
-
-	/*
-	 * To avoid recursion, we perform back-tracking while deactivating
-	 * nodes. For each node we enter, we first mark the active-counter as
-	 * deactivated by adding BIAS. If the node as children, we set the first
-	 * child as current position and start over. If the node has no
-	 * children, we drain the node by waiting for all active refs to be
-	 * dropped and then releasing the node.
-	 *
-	 * After the node is released, we set its parent as current position
-	 * and start over. If the current position was the initial node, we're
-	 * done.
-	 *
-	 * Note that this function can be called in parallel by multiple
-	 * callers. We make sure that each node is only released once, and any
-	 * racing caller will wait until the other thread fully released that
-	 * node.
-	 */
-
-	for (;;) {
-		/*
-		 * Add BIAS to node->active to mark it as inactive. If it was
-		 * never active before, immediately mark it as RELEASE_INACTIVE
-		 * so we remember this state.
-		 * We cannot remember v_pre as we might iterate into the
-		 * children, overwriting v_pre, before we can release our node.
-		 */
-		mutex_lock(&pos->lock);
-		v_pre = atomic_read(&pos->active);
-		if (v_pre >= 0)
-			atomic_add_return(KDBUS_NODE_BIAS, &pos->active);
-		else if (v_pre == KDBUS_NODE_NEW)
-			atomic_set(&pos->active, KDBUS_NODE_RELEASE_DIRECT);
-		mutex_unlock(&pos->lock);
-
+	while (pos) {
 		/* wait until all active references were dropped */
 		wait_event(pos->waitq,
 			   atomic_read(&pos->active) <= KDBUS_NODE_BIAS);
 
-		mutex_lock(&pos->lock);
-		/* recurse into first child if any */
-		rb = rb_first(&pos->children);
-		if (rb) {
-			child = kdbus_node_ref(kdbus_node_from_rb(rb));
-			mutex_unlock(&pos->lock);
-			pos = child;
-			continue;
-		}
-
 		/* mark object as RELEASE */
-		v_post = atomic_read(&pos->active);
-		if (v_post == KDBUS_NODE_BIAS ||
-		    v_post == KDBUS_NODE_RELEASE_DIRECT)
+		mutex_lock(&pos->lock);
+		v = atomic_read(&pos->active);
+		if (v == KDBUS_NODE_BIAS || v == KDBUS_NODE_RELEASE_DIRECT)
 			atomic_set(&pos->active, KDBUS_NODE_RELEASE);
 		mutex_unlock(&pos->lock);
 
@@ -614,20 +699,9 @@ void kdbus_node_deactivate(struct kdbus_node *node)
 		 * perform the actual release. Otherwise, we wait until the
 		 * release is done and the node is marked as DRAINED.
 		 */
-		if (v_post == KDBUS_NODE_BIAS ||
-		    v_post == KDBUS_NODE_RELEASE_DIRECT) {
+		if (v == KDBUS_NODE_BIAS || v == KDBUS_NODE_RELEASE_DIRECT) {
 			if (pos->release_cb)
-				pos->release_cb(pos, v_post == KDBUS_NODE_BIAS);
-
-			if (pos->parent) {
-				mutex_lock(&pos->parent->lock);
-				if (!RB_EMPTY_NODE(&pos->rb)) {
-					rb_erase(&pos->rb,
-						 &pos->parent->children);
-					RB_CLEAR_NODE(&pos->rb);
-				}
-				mutex_unlock(&pos->parent->lock);
-			}
+				pos->release_cb(pos, v == KDBUS_NODE_BIAS);
 
 			/* mark as DRAINED */
 			atomic_set(&pos->active, KDBUS_NODE_DRAINED);
@@ -646,7 +720,7 @@ void kdbus_node_deactivate(struct kdbus_node *node)
 			 * immediately went to NODE_RELEASE_DIRECT. In that case
 			 * we must not drop the reference.
 			 */
-			if (v_post == KDBUS_NODE_BIAS)
+			if (v == KDBUS_NODE_BIAS)
 				kdbus_node_unref(pos);
 		} else {
 			/* wait until object is DRAINED */
@@ -654,19 +728,8 @@ void kdbus_node_deactivate(struct kdbus_node *node)
 			    atomic_read(&pos->active) == KDBUS_NODE_DRAINED);
 		}
 
-		/*
-		 * We're done with the current node. Continue on its parent
-		 * again, which will try deactivating its next child, or itself
-		 * if no child is left.
-		 * If we've reached our initial node again, we are done and
-		 * can safely return.
-		 */
-		if (pos == node)
-			break;
-
-		child = pos;
-		pos = pos->parent;
-		kdbus_node_unref(child);
+		mutex_lock(&pos->lock);
+		pos = kdbus_node_recurse_unlock(node, pos);
 	}
 }
 
@@ -857,18 +920,6 @@ struct kdbus_node *kdbus_node_next_child(struct kdbus_node *node,
 		if (!rb)
 			goto exit;
 		pos = kdbus_node_from_rb(rb);
-		if (kdbus_node_acquire(pos))
-			goto exit;
-	} else if (RB_EMPTY_NODE(&prev->rb)) {
-		/*
-		 * The current iterator is no longer linked to the rb-tree. Use
-		 * its hash value and name to find the next _higher_ node and
-		 * acquire it. If we got it, return it as next element.
-		 * Otherwise, the loop below will find the next active node.
-		 */
-		pos = node_find_closest_unlocked(node, prev->hash, prev->name);
-		if (!pos)
-			goto exit;
 		if (kdbus_node_acquire(pos))
 			goto exit;
 	} else {
