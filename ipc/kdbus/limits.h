@@ -41,7 +41,7 @@
 #define KDBUS_SYSNAME_MAX_LEN			63
 
 /* maximum number of matches per connection */
-#define KDBUS_MATCH_MAX				256
+#define KDBUS_MATCH_MAX				4096
 
 /* maximum number of queued messages from the same individual user */
 #define KDBUS_CONN_MAX_MSGS			256
