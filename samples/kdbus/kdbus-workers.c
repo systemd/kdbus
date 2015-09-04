@@ -819,7 +819,7 @@ static int child_run(struct child *c)
 	 * file descriptor.
 	 */
 	r = kdbus_cmd_send(c->bus->fd, &cmd);
-	if (r == -ESRCH || r == -EPIPE || r == -ECONNRESET)
+	if (r == -ESRCH || r == -EPIPE || r == -ENXIO)
 		return 0;
 	if (r < 0)
 		return err_r(r, "cannot send request to master");

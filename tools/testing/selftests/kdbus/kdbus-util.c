@@ -993,7 +993,7 @@ int kdbus_msg_recv(struct kdbus_conn *conn,
 /*
  * Returns: 0 on success, negative errno on failure.
  *
- * We must return -ETIMEDOUT, -ECONNREST, -EAGAIN and other errors.
+ * We must return -ETIMEDOUT, -EAGAIN and other errors.
  * We must return the result of kdbus_msg_recv()
  */
 int kdbus_msg_recv_poll(struct kdbus_conn *conn,
@@ -1025,7 +1025,7 @@ int kdbus_msg_recv_poll(struct kdbus_conn *conn,
 				ret = kdbus_msg_recv(conn, msg_out, offset);
 
 			if (fd.revents & (POLLHUP | POLLERR))
-				ret = -ECONNRESET;
+				ret = -ESHUTDOWN;
 		}
 
 		if (ret == 0 || ret != -EAGAIN)

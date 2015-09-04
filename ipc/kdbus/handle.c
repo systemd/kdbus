@@ -321,8 +321,10 @@ static int kdbus_handle_release(struct inode *inode, struct file *file)
 		}
 		break;
 	case KDBUS_HANDLE_CONNECTED:
-		kdbus_conn_disconnect(handle->conn, false);
-		kdbus_conn_unref(handle->conn);
+		if (handle->conn) {
+			kdbus_conn_disconnect(handle->conn, false);
+			kdbus_conn_unref(handle->conn);
+		}
 		break;
 	case KDBUS_HANDLE_NONE:
 		/* nothing to clean up */
@@ -460,13 +462,11 @@ static long kdbus_handle_ioctl_connected(struct file *file,
 {
 	struct kdbus_handle *handle = file->private_data;
 	struct kdbus_conn *conn = handle->conn;
-	struct kdbus_conn *release_conn = NULL;
+	struct kdbus_node *node = &conn->node;
 	int ret;
 
-	release_conn = conn;
-	ret = kdbus_conn_acquire(release_conn);
-	if (ret < 0)
-		return ret;
+	if (!kdbus_node_acquire(node))
+		return -ESHUTDOWN;
 
 	switch (command) {
 	case KDBUS_CMD_BYEBYE:
@@ -476,8 +476,8 @@ static long kdbus_handle_ioctl_connected(struct file *file,
 		 * because kdbus_conn_disconnect() will wait for all acquired
 		 * references to be dropped.
 		 */
-		kdbus_conn_release(release_conn);
-		release_conn = NULL;
+		kdbus_node_release(node);
+		node = NULL;
 		ret = kdbus_cmd_byebye_unlocked(conn, buf);
 		break;
 	case KDBUS_CMD_NAME_ACQUIRE:
@@ -518,7 +518,7 @@ static long kdbus_handle_ioctl_connected(struct file *file,
 		break;
 	}
 
-	kdbus_conn_release(release_conn);
+	kdbus_node_release(node);
 	return ret;
 }
 
@@ -644,7 +644,7 @@ static unsigned int kdbus_handle_poll(struct file *file,
 	 * after we checked it, the waitqueue is signaled and we're called
 	 * again.
 	 */
-	if (!kdbus_conn_active(handle->conn))
+	if (!kdbus_node_is_active(&handle->conn->node))
 		return POLLERR | POLLHUP;
 
 	if (!list_empty(&handle->conn->queue.msg_list) ||

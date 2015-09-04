@@ -1085,13 +1085,6 @@ struct kdbus_msg_info {
         </varlistentry>
 
         <varlistentry>
-          <term><constant>ECONNRESET</constant></term>
-          <listitem><para>
-            The destination connection is no longer active.
-          </para></listitem>
-        </varlistentry>
-
-        <varlistentry>
           <term><constant>ETIMEDOUT</constant></term>
           <listitem><para>
             Timeout while synchronously waiting for a reply.

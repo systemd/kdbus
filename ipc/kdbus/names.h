@@ -78,8 +78,8 @@ kdbus_name_lookup_unlocked(struct kdbus_name_registry *reg, const char *name);
 int kdbus_name_acquire(struct kdbus_name_registry *reg,
 		       struct kdbus_conn *conn, const char *name,
 		       u64 flags, u64 *return_flags);
-void kdbus_name_release_all(struct kdbus_name_registry *reg,
-			    struct kdbus_conn *conn);
+void kdbus_name_release_all_unlocked(struct kdbus_name_registry *reg,
+				     struct kdbus_conn *conn);
 
 int kdbus_cmd_name_acquire(struct kdbus_conn *conn, void __user *argp);
 int kdbus_cmd_name_release(struct kdbus_conn *conn, void __user *argp);

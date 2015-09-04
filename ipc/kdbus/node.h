@@ -26,6 +26,7 @@ enum kdbus_node_type {
 	KDBUS_NODE_CONTROL,
 	KDBUS_NODE_BUS,
 	KDBUS_NODE_ENDPOINT,
+	KDBUS_NODE_CONNECTION,
 };
 
 typedef void (*kdbus_node_free_t) (struct kdbus_node *node);

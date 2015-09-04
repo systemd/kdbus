@@ -496,25 +496,27 @@ static int kdbus_name_release(struct kdbus_name_registry *reg,
 }
 
 /**
- * kdbus_name_release_all() - remove all name entries of a given connection
+ * kdbus_name_release_all_unlocked() - remove all name entries of a connection
  * @reg:		name registry
  * @conn:		connection
+ *
+ * This releases all names that the passed connection @conn owns. It is
+ * equivalent to calling kdbus_name_release() for each owned name.
+ *
+ * The caller must hold a write-lock on the registry! Furthermore, the caller
+ * is responsible to flush the notify-queue once all locks got dropped.
  */
-void kdbus_name_release_all(struct kdbus_name_registry *reg,
-			    struct kdbus_conn *conn)
+void kdbus_name_release_all_unlocked(struct kdbus_name_registry *reg,
+				     struct kdbus_conn *conn)
 {
 	struct kdbus_name_owner *owner;
 
-	down_write(&reg->rwlock);
+	lockdep_assert_held(&reg->rwlock);
 
 	while ((owner = list_first_entry_or_null(&conn->names_list,
 						 struct kdbus_name_owner,
 						 conn_entry)))
 		kdbus_name_release_unlocked(owner);
-
-	up_write(&reg->rwlock);
-
-	kdbus_notify_flush(conn->ep->bus);
 }
 
 /**

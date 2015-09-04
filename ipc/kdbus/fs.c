@@ -51,6 +51,8 @@ static inline unsigned char kdbus_dt_type(struct kdbus_node *node)
 	case KDBUS_NODE_CONTROL:
 	case KDBUS_NODE_ENDPOINT:
 		return DT_REG;
+	case KDBUS_NODE_CONNECTION:
+		return DT_UNKNOWN;
 	}
 
 	return DT_UNKNOWN;
@@ -220,6 +222,9 @@ static struct inode *fs_inode_get(struct super_block *sb,
 		inode->i_mode |= S_IFREG;
 		inode->i_op = &fs_inode_iops;
 		inode->i_fop = &kdbus_handle_ops;
+		break;
+	case KDBUS_NODE_CONNECTION:
+		WARN(1, "populating a connection inode\n");
 		break;
 	}
 

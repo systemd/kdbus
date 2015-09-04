@@ -22,6 +22,7 @@
 
 #include "limits.h"
 #include "metadata.h"
+#include "node.h"
 #include "pool.h"
 #include "queue.h"
 #include "util.h"
@@ -36,8 +37,7 @@ struct kdbus_staging;
 
 /**
  * struct kdbus_conn - connection to a bus
- * @kref:		Reference count
- * @active:		Active references to the connection
+ * @node:		Underlying API node
  * @id:			Connection ID
  * @flags:		KDBUS_HELLO_* flags
  * @attach_flags_send:	KDBUS_ATTACH_* flags for sending
@@ -76,11 +76,7 @@ struct kdbus_staging;
  * @owner:		Owned by the same user as the bus owner
  */
 struct kdbus_conn {
-	struct kref kref;
-	atomic_t active;
-#ifdef CONFIG_DEBUG_LOCK_ALLOC
-	struct lockdep_map dep_map;
-#endif
+	struct kdbus_node node;
 	u64 id;
 	u64 flags;
 	atomic64_t attach_flags_send;
@@ -119,10 +115,7 @@ struct kdbus_conn {
 
 struct kdbus_conn *kdbus_conn_ref(struct kdbus_conn *conn);
 struct kdbus_conn *kdbus_conn_unref(struct kdbus_conn *conn);
-bool kdbus_conn_active(const struct kdbus_conn *conn);
-int kdbus_conn_acquire(struct kdbus_conn *conn);
-void kdbus_conn_release(struct kdbus_conn *conn);
-int kdbus_conn_disconnect(struct kdbus_conn *conn, bool ensure_queue_empty);
+bool kdbus_conn_disconnect(struct kdbus_conn *conn, bool ensure_queue_empty);
 bool kdbus_conn_has_name(struct kdbus_conn *conn, const char *name);
 int kdbus_conn_quota_inc(struct kdbus_conn *c, struct kdbus_user *u,
 			 size_t memory, size_t fds);
@@ -254,7 +247,7 @@ static inline void kdbus_conn_unlock2(struct kdbus_conn *a,
  */
 static inline void kdbus_conn_assert_active(struct kdbus_conn *conn)
 {
-	lockdep_assert_held(conn);
+	/* TODO: provide lockdep for kdbus_node.active */
 }
 
 #endif

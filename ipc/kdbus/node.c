@@ -314,7 +314,7 @@ void kdbus_node_init(struct kdbus_node *node, unsigned int type)
  * kdbus_node_link() - link a node into the nodes system
  * @node:	Pointer to the node to initialize
  * @parent:	Pointer to a parent node, may be %NULL
- * @name:	The name of the node (or NULL if root node)
+ * @name:	The name of the node, or NULL
  *
  * This links a node into the hierarchy. This must not be called multiple times.
  * If @parent is NULL, the node becomes a new root node.
@@ -333,26 +333,28 @@ int kdbus_node_link(struct kdbus_node *node, struct kdbus_node *parent,
 {
 	int ret;
 
-	if (WARN_ON(node->type != KDBUS_NODE_DOMAIN && !parent))
-		return -EINVAL;
-
-	if (WARN_ON(parent && !name))
-		return -EINVAL;
-
-	if (name) {
-		node->name = kstrdup(name, GFP_KERNEL);
-		if (!node->name)
-			return -ENOMEM;
-
-		node->hash = kdbus_node_name_hash(name);
-	}
-
 	ret = ida_simple_get(&kdbus_node_ida, 1, 0, GFP_KERNEL);
 	if (ret < 0)
 		return ret;
 
 	node->id = ret;
 	ret = 0;
+
+	if (name) {
+		node->name = kstrdup(name, GFP_KERNEL);
+	} else if (node->type == KDBUS_NODE_DOMAIN) {
+		node->name = kasprintf(GFP_KERNEL, "domain-%u", node->id);
+	} else if (node->type == KDBUS_NODE_CONNECTION) {
+		node->name = kasprintf(GFP_KERNEL, "connection-%u", node->id);
+	} else {
+		WARN(1, "linking node without name\n");
+		return -EINVAL;
+	}
+
+	if (!node->name)
+		return -ENOMEM;
+
+	node->hash = kdbus_node_name_hash(node->name);
 
 	if (parent) {
 		struct rb_node **n, *prev;

@@ -136,9 +136,9 @@ int kdbus_test_byebye(struct kdbus_test_env *env)
 	ret = kdbus_cmd_byebye(conn->fd, &cmd_byebye);
 	ASSERT_RETURN(ret == 0);
 
-	/* a 2nd try should result in -ECONNRESET */
+	/* a 2nd try should result in -ESHUTDOWN */
 	ret = kdbus_cmd_byebye(conn->fd, &cmd_byebye);
-	ASSERT_RETURN(ret == -ECONNRESET);
+	ASSERT_RETURN(ret == -ESHUTDOWN);
 
 	kdbus_conn_free(conn);
 

@@ -204,7 +204,7 @@ void kdbus_reply_list_scan_work(struct work_struct *work)
 	now = ktime_get_ns();
 
 	mutex_lock(&conn->lock);
-	if (!kdbus_conn_active(conn)) {
+	if (!kdbus_node_is_active(&conn->node)) {
 		mutex_unlock(&conn->lock);
 		return;
 	}

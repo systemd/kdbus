@@ -323,7 +323,7 @@ int kdbus_test_sync_byebye(struct kdbus_test_env *env)
 	 * received the message and then invokes BYEBYE on the *ORIGINAL*
 	 * connection. That is, on the same connection that synchronously waits
 	 * for an reply.
-	 * This should properly wake the connection up and cause ECONNRESET as
+	 * This should properly wake the connection up and cause ESHUTDOWN as
 	 * the connection is disconnected now.
 	 *
 	 * The second time, we do the same but invoke BYEBYE on the *TARGET*
@@ -341,7 +341,7 @@ int kdbus_test_sync_byebye(struct kdbus_test_env *env)
 				  KDBUS_MSG_EXPECT_REPLY,
 				  5000000000ULL, 0, conn_a->id, -1);
 
-	ASSERT_RETURN(ret == -ECONNRESET);
+	ASSERT_RETURN(ret == -ESHUTDOWN);
 
 	pthread_join(thread, NULL);
 

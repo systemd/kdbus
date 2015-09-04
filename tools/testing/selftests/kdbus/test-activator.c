@@ -35,7 +35,7 @@ static int kdbus_starter_poll(struct kdbus_conn *conn)
 			return 0;
 
 		if (fd.revents & (POLLHUP | POLLERR))
-			ret = -ECONNRESET;
+			ret = -ESHUTDOWN;
 	}
 
 	return ret;
