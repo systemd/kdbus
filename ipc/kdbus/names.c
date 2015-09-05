@@ -49,7 +49,7 @@ kdbus_name_owner_new(struct kdbus_conn *conn, struct kdbus_name_entry *name,
 {
 	struct kdbus_name_owner *owner;
 
-	kdbus_conn_assert_active(conn);
+	kdbus_assert_held(conn);
 
 	if (conn->name_count >= KDBUS_CONN_MAX_NAMES)
 		return ERR_PTR(-E2BIG);
@@ -366,7 +366,7 @@ int kdbus_name_acquire(struct kdbus_name_registry *reg,
 	u32 hash;
 	int ret;
 
-	kdbus_conn_assert_active(conn);
+	kdbus_assert_held(conn);
 
 	down_write(&reg->rwlock);
 

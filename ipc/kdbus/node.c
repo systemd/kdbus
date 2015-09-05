@@ -15,6 +15,7 @@
 #include <linux/fs.h>
 #include <linux/idr.h>
 #include <linux/kdev_t.h>
+#include <linux/lockdep.h>
 #include <linux/rbtree.h>
 #include <linux/rwsem.h>
 #include <linux/sched.h>
@@ -216,6 +217,9 @@
  * across node-deactivation. The task putting it into NODE_RELEASE now knows
  * whether the node was active before or not.
  *
+ * We support lockdep annotations for 'active references'. We treat active
+ * references as a read-trylock, and deactivation as a write-lock.
+ *
  * Some archs implement atomic_sub(v) with atomic_add(-v), so reserve INT_MIN
  * to avoid overflows if multiplied by -1.
  */
@@ -300,6 +304,25 @@ static int kdbus_node_name_compare(unsigned int hash, const char *name,
  */
 void kdbus_node_init(struct kdbus_node *node, unsigned int type)
 {
+#ifdef CONFIG_DEBUG_LOCK_ALLOC
+	static struct lock_class_key lock_keys[KDBUS_NODE_N];
+	static const char *lock_names[] = {
+		"kdbus.domain.node.active",
+		"kdbus.control.node.active",
+		"kdbus.bus.node.active",
+		"kdbus.endpoint.node.active",
+		"kdbus.connection.node.active",
+	};
+
+	BUILD_BUG_ON(ARRAY_SIZE(lock_names) != ARRAY_SIZE(lock_keys));
+	WARN_ON(type >= KDBUS_NODE_N);
+
+	lockdep_init_map(&node->dep_map,
+			 lock_names[type],
+			 &lock_keys[type],
+			 0);
+#endif
+
 	atomic_set(&node->refcnt, 1);
 	mutex_init(&node->lock);
 	node->id = 0;
@@ -740,6 +763,24 @@ void kdbus_node_drain(struct kdbus_node *node)
 
 	pos = kdbus_node_post_recurse(node, NULL);
 	while (pos) {
+
+#ifdef CONFIG_DEBUG_LOCK_ALLOC
+		/*
+		 * We pretend this is a down_write_interruptible() and all but
+		 * the release-context get interrupted. This is required, as we
+		 * cannot call lock_acquired() on multiple threads without
+		 * synchronization. Hence, only the release-context will do
+		 * this, all others just release the lock.
+		 */
+		lock_acquire_exclusive(&pos->dep_map,	/* lock */
+				       0,		/* subclass */
+				       0,		/* try-lock */
+				       NULL,		/* nest underneath */
+				       _RET_IP_);	/* IP */
+		if (atomic_read(&pos->active) > KDBUS_NODE_BIAS)
+			lock_contended(&pos->dep_map, _RET_IP_);
+#endif
+
 		/* wait until all active references were dropped */
 		wait_event(pos->waitq,
 			   atomic_read(&pos->active) <= KDBUS_NODE_BIAS);
@@ -757,6 +798,12 @@ void kdbus_node_drain(struct kdbus_node *node)
 		 * release is done and the node is marked as DRAINED.
 		 */
 		if (v == KDBUS_NODE_BIAS || v == KDBUS_NODE_RELEASE_DIRECT) {
+
+#ifdef CONFIG_DEBUG_LOCK_ALLOC
+			/* we're the release-context and acquired the lock */
+			lock_acquired(&pos->dep_map, _RET_IP_);
+#endif
+
 			if (pos->release_cb)
 				pos->release_cb(pos, v == KDBUS_NODE_BIAS);
 
@@ -780,10 +827,28 @@ void kdbus_node_drain(struct kdbus_node *node)
 			if (v == KDBUS_NODE_BIAS)
 				kdbus_node_unref(pos);
 		} else {
+
+#ifdef CONFIG_DEBUG_LOCK_ALLOC
+			/* we're contended against the release context */
+			lock_contended(&pos->dep_map, _RET_IP_);
+#endif
+
 			/* wait until object is DRAINED */
 			wait_event(pos->waitq,
 			    atomic_read(&pos->active) == KDBUS_NODE_DRAINED);
 		}
+
+#ifdef CONFIG_DEBUG_LOCK_ALLOC
+		/*
+		 * No-one but the release-context acquired the lock. However,
+		 * that does not matter as we simply treat this as
+		 * 'interrupted'. Everyone releases the lock, but only one
+		 * caller really got it.
+		 */
+		lock_release(&pos->dep_map,	/* lock */
+			     1,			/* nested (no-op) */
+			     _RET_IP_);		/* instruction pointer */
+#endif
 
 		pos = kdbus_node_post_recurse(node, pos);
 	}
@@ -803,7 +868,18 @@ void kdbus_node_drain(struct kdbus_node *node)
  */
 bool kdbus_node_acquire(struct kdbus_node *node)
 {
-	return node && atomic_inc_unless_negative(&node->active);
+	bool res;
+
+	res = node && atomic_inc_unless_negative(&node->active);
+#ifdef CONFIG_DEBUG_LOCK_ALLOC
+	if (res)
+		lock_acquire_shared(&node->dep_map,	/* lock */
+				    0,			/* subclass */
+				    1,			/* try-lock */
+				    NULL,		/* nest underneath */
+				    _RET_IP_);		/* IP */
+#endif
+	return res;
 }
 
 /**
@@ -815,8 +891,15 @@ bool kdbus_node_acquire(struct kdbus_node *node)
  */
 void kdbus_node_release(struct kdbus_node *node)
 {
-	if (node && atomic_dec_return(&node->active) == KDBUS_NODE_BIAS)
-		wake_up(&node->waitq);
+	if (node) {
+#ifdef CONFIG_DEBUG_LOCK_ALLOC
+		lock_release(&node->dep_map,	/* lock */
+			     1,			/* nested (no-op) */
+			     _RET_IP_);		/* instruction pointer */
+#endif
+		if (atomic_dec_return(&node->active) == KDBUS_NODE_BIAS)
+			wake_up(&node->waitq);
+	}
 }
 
 /**

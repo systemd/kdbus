@@ -16,6 +16,7 @@
 
 #include <linux/atomic.h>
 #include <linux/kernel.h>
+#include <linux/lockdep.h>
 #include <linux/mutex.h>
 #include <linux/wait.h>
 
@@ -27,6 +28,7 @@ enum kdbus_node_type {
 	KDBUS_NODE_BUS,
 	KDBUS_NODE_ENDPOINT,
 	KDBUS_NODE_CONNECTION,
+	KDBUS_NODE_N,
 };
 
 typedef void (*kdbus_node_free_t) (struct kdbus_node *node);
@@ -37,6 +39,10 @@ struct kdbus_node {
 	atomic_t refcnt;
 	atomic_t active;
 	wait_queue_head_t waitq;
+
+#ifdef CONFIG_DEBUG_LOCK_ALLOC
+	struct lockdep_map dep_map;
+#endif
 
 	/* static members */
 	unsigned int type;
@@ -84,5 +90,29 @@ struct kdbus_node *kdbus_node_find_closest(struct kdbus_node *node,
 					   unsigned int hash);
 struct kdbus_node *kdbus_node_next_child(struct kdbus_node *node,
 					 struct kdbus_node *prev);
+
+/**
+ * kdbus_node_assert_held() - lockdep assertion for active reference
+ * @node:	node that should be held active
+ *
+ * The concept of active-references is very similar to rw-locks. Hence, we
+ * support lockdep integration to check that the caller holds an active
+ * reference to a node. This call integrates with lockdep and throws an
+ * exception if the current context does not own an active reference to the
+ * passed node.
+ */
+static inline void kdbus_node_assert_held(struct kdbus_node *node)
+{
+	lockdep_assert_held(node);
+}
+
+/**
+ * kdbus_assert_held() - lockdep assertion for active references
+ * @_obj:		object that should be held active
+ *
+ * This is the same as kdbus_node_assert_held(), but can be called directly
+ * on an object that embeds 'struct kdbus_node' as a member called 'node'.
+ */
+#define kdbus_assert_held(_obj) kdbus_node_assert_held(&(_obj)->node)
 
 #endif
