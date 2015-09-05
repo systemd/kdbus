@@ -38,38 +38,36 @@ struct kdbus_staging;
 /**
  * struct kdbus_conn - connection to a bus
  * @node:		Underlying API node
+ * @lock:		Connection data lock
  * @id:			Connection ID
  * @flags:		KDBUS_HELLO_* flags
- * @attach_flags_send:	KDBUS_ATTACH_* flags for sending
- * @attach_flags_recv:	KDBUS_ATTACH_* flags for receiving
  * @description:	Human-readable connection description, used for
  *			debugging. This field is only set when the
  *			connection is created.
  * @ep:			The endpoint this connection belongs to
- * @lock:		Connection data lock
- * @hentry:		Entry in ID <-> connection map
- * @ep_entry:		Entry in endpoint
- * @monitor_entry:	Entry in monitor, if the connection is a monitor
- * @reply_list:		List of connections this connection should
- *			reply to
- * @work:		Delayed work to handle timeouts
- *			activator for
- * @match_db:		Subscription filter to broadcast messages
- * @meta_proc:		Process metadata of connection creator, or NULL
- * @meta_fake:		Faked metadata, or NULL
- * @pool:		The user's buffer to receive messages
  * @user:		Owner of the connection
  * @cred:		The credentials of the connection at creation time
  * @pid:		Pid at creation time
  * @root_path:		Root path at creation time
- * @request_count:	Number of pending requests issued by this
- *			connection that are waiting for replies from
- *			other peers
+ * @meta_proc:		Process metadata of connection creator, or NULL
+ * @meta_fake:		Faked metadata, or NULL
+ * @attach_flags_send:	KDBUS_ATTACH_* flags for sending
+ * @attach_flags_recv:	KDBUS_ATTACH_* flags for receiving
+ * @request_count:	Number of pending requests
  * @lost_count:		Number of lost broadcast messages
+ * @work:		Delayed work to handle timeouts
+ *			activator for
+ * @match_db:		Subscription filter to broadcast messages
+ * @pool:		The user's buffer to receive messages
  * @wait:		Wake up this endpoint
  * @queue:		The message queue associated with this connection
  * @quota:		Array of per-user quota indexed by user->id
  * @n_quota:		Number of elements in quota array
+ * @reply_list:		List of connections this connection should
+ *			reply to
+ * @hentry:		Entry in ID <-> connection map
+ * @monitor_entry:	Entry in monitor, if the connection is a monitor
+ * @ep_entry:		Entry in endpoint
  * @names_list:		List of well-known names
  * @name_count:		Number of owned well-known names
  * @privileged:		Whether this connection is privileged on the domain
@@ -77,38 +75,48 @@ struct kdbus_staging;
  */
 struct kdbus_conn {
 	struct kdbus_node node;
+	struct mutex lock;
+
+	/* static */
 	u64 id;
 	u64 flags;
-	atomic64_t attach_flags_send;
-	atomic64_t attach_flags_recv;
 	const char *description;
 	struct kdbus_ep *ep;
-	struct mutex lock;
-	struct hlist_node hentry;
-	struct list_head ep_entry;
-	struct list_head monitor_entry;
-	struct list_head reply_list;
-	struct delayed_work work;
-	struct kdbus_match_db *match_db;
-	struct kdbus_meta_proc *meta_proc;
-	struct kdbus_meta_fake *meta_fake;
-	struct kdbus_pool *pool;
 	struct kdbus_user *user;
 	const struct cred *cred;
 	struct pid *pid;
 	struct path root_path;
+	struct kdbus_meta_proc *meta_proc;
+	struct kdbus_meta_fake *meta_fake;
+
+	/* protected by own locks */
+	atomic64_t attach_flags_send;
+	atomic64_t attach_flags_recv;
 	atomic_t request_count;
 	atomic_t lost_count;
+	struct delayed_work work;
+	struct kdbus_match_db *match_db;
+	struct kdbus_pool *pool;
 	wait_queue_head_t wait;
-	struct kdbus_queue queue;
 
+	/* protected by @lock */
+	struct kdbus_queue queue;
 	struct kdbus_quota *quota;
 	unsigned int n_quota;
+	struct list_head reply_list;
+
+	/* protected by @ep->bus->conn_rwlock */
+	struct hlist_node hentry;
+	struct list_head monitor_entry;
+
+	/* protected by @ep->lock */
+	struct list_head ep_entry;
 
 	/* protected by registry->rwlock */
 	struct list_head names_list;
 	unsigned int name_count;
 
+	/* static */
 	bool privileged:1;
 	bool owner:1;
 };

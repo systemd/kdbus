@@ -26,19 +26,27 @@
  * struct kdbus_domain - domain for buses
  * @node:		Underlying API node
  * @lock:		Domain data lock
+ * @user_namespace:	User namespace, pinned at creation time
  * @last_id:		Last used object id
  * @user_idr:		Set of all users indexed by UID
  * @user_ida:		Set of all users to compute small indices
- * @user_namespace:	User namespace, pinned at creation time
  * @dentry:		Root dentry of VFS mount (don't use outside of kdbusfs)
  */
 struct kdbus_domain {
 	struct kdbus_node node;
 	struct mutex lock;
+
+	/* static */
+	struct user_namespace *user_namespace;
+
+	/* protected by own locks */
 	atomic64_t last_id;
+
+	/* protected by @lock */
 	struct idr user_idr;
 	struct ida user_ida;
-	struct user_namespace *user_namespace;
+
+	/* protected by active references */
 	struct dentry *dentry;
 };
 
@@ -53,9 +61,13 @@ struct kdbus_domain {
  */
 struct kdbus_user {
 	struct kref kref;
+
+	/* static */
 	struct kdbus_domain *domain;
 	unsigned int id;
 	kuid_t uid;
+
+	/* protected by own locks */
 	atomic_t buses;
 	atomic_t connections;
 };

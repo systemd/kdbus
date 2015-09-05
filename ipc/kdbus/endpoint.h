@@ -48,7 +48,7 @@ struct kdbus_ep {
 	/* protected by own locks */
 	struct kdbus_policy_db policy_db;
 
-	/* protected by ep->lock */
+	/* protected by @lock */
 	struct list_head conn_list;
 };
 
