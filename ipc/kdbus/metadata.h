@@ -16,6 +16,7 @@
 #define __KDBUS_METADATA_H
 
 #include <linux/kernel.h>
+#include <uapi/linux/kdbus.h>
 
 struct kdbus_conn;
 struct kdbus_pool_slice;
